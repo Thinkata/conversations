@@ -7,10 +7,18 @@ export default defineEventHandler(async (event) => {
     const apiKey = runtimeConfig.API_KEY
     const baseURL = runtimeConfig.BASE_URL
 
-    if (!apiKey) {
+    // Validate configuration
+    if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
       throw createError({ 
         statusCode: 500, 
         statusMessage: 'API key not configured. Please set API_KEY environment variable.' 
+      })
+    }
+
+    if (!baseURL || typeof baseURL !== 'string' || !baseURL.trim()) {
+      throw createError({ 
+        statusCode: 500, 
+        statusMessage: 'Base URL not configured. Please set BASE_URL environment variable.' 
       })
     }
 

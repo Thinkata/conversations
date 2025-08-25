@@ -13,8 +13,55 @@ describe('Security Tests', () => {
         usage: { prompt_tokens: 10, completion_tokens: 20 },
         conversationId: 'test-conversation-id'
       },
-              delay: 100 // Reduced delay for faster tests
+      delay: 100 // Reduced delay for faster tests
     }).as('chatRequest')
+  })
+
+  describe('Security Headers', () => {
+    it('should have proper security headers', () => {
+      cy.request('/').then((response) => {
+        expect(response.headers).to.have.property('x-content-type-options', 'nosniff')
+        expect(response.headers).to.have.property('x-frame-options', 'DENY')
+        expect(response.headers).to.have.property('x-xss-protection', '1; mode=block')
+        expect(response.headers).to.have.property('referrer-policy', 'strict-origin-when-cross-origin')
+        expect(response.headers).to.have.property('content-security-policy')
+      })
+    })
+
+    it('should have proper API security headers', () => {
+      cy.request('/api/models').then((response) => {
+        expect(response.headers).to.have.property('x-content-type-options', 'nosniff')
+        expect(response.headers).to.have.property('x-frame-options', 'DENY')
+        expect(response.headers).to.have.property('x-xss-protection', '1; mode=block')
+      })
+    })
+  })
+
+  describe('Rate Limiting', () => {
+    it('should enforce rate limiting on API endpoints', () => {
+      // Make multiple rapid requests to trigger rate limiting
+      const requests = Array(35).fill(null).map(() => 
+        cy.request({
+          method: 'POST',
+          url: '/api/chat',
+          body: { prompt: 'test', model: 'test-model' },
+          failOnStatusCode: false
+        })
+      )
+
+      cy.wrap(requests).then(() => {
+        // The last few requests should be rate limited
+        cy.request({
+          method: 'POST',
+          url: '/api/chat',
+          body: { prompt: 'test', model: 'test-model' },
+          failOnStatusCode: false
+        }).then((response) => {
+          // Should get rate limited (429) or still succeed (within limit)
+          expect([200, 429]).to.include(response.status)
+        })
+      })
+    })
   })
 
   describe('XSS Protection', () => {

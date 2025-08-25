@@ -31,18 +31,37 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
   const { prompt, model, images, audios, conversationId, systemPrompt, messages } = body || {}
 
-  // Validate required fields
-  if (!prompt || !prompt.trim()) {
+  // Enhanced input validation and sanitization
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     throw createError({ 
       statusCode: 400, 
-      statusMessage: 'Missing prompt' 
+      statusMessage: 'Missing or invalid prompt' 
     })
   }
 
-  if (!model || !model.trim()) {
+  // Sanitize prompt (remove potential XSS)
+  const sanitizedPrompt = prompt.trim().replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+
+  if (!model || typeof model !== 'string' || !model.trim()) {
     throw createError({ 
       statusCode: 400, 
-      statusMessage: 'Missing model' 
+      statusMessage: 'Missing or invalid model' 
+    })
+  }
+
+  // Validate prompt length
+  if (sanitizedPrompt.length > 10000) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Prompt too long (max 10,000 characters)'
+    })
+  }
+
+  // Validate model name format
+  if (!/^[a-zA-Z0-9\-_\.]+$/.test(model.trim())) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid model name format'
     })
   }
 
@@ -66,7 +85,7 @@ export default defineEventHandler(async (event) => {
     const existingId = conversationId && conversationId.trim().length > 0 ? conversationId.trim() : crypto.randomUUID()
 
     // Build user message content - support text + multimodal
-    const content: any[] = [{ type: 'text', text: prompt }]
+    const content: any[] = [{ type: 'text', text: sanitizedPrompt }]
 
     if (images && images.length > 0) {
       for (const imageData of images) {
@@ -154,7 +173,14 @@ export default defineEventHandler(async (event) => {
     return { success: true, content: responseContent, model: model, usage: chatResponse.usage, conversationId: existingId }
 
   } catch (error: any) {
-    console.error('AI API Error:', error)
+    // Sanitize error logging to prevent sensitive information exposure
+    const sanitizedError = {
+      status: error.status,
+      code: error.code,
+      message: error.message,
+      type: error.type
+    }
+    console.error('AI API Error:', sanitizedError)
     
     // Handle different types of errors
     if (error.status) {
@@ -173,7 +199,7 @@ export default defineEventHandler(async (event) => {
       // Other errors
       throw createError({
         statusCode: 500,
-        statusMessage: error.message || 'Internal server error'
+        statusMessage: 'Internal server error'
       })
     }
   }
