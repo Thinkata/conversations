@@ -61,25 +61,32 @@ jobs:
           BASE_URL: 'https://api.example.com/v1'
           DEFAULT_MODEL: 'test-model'
 
-      - name: Start application
+      - name: Start static file server
         run: |
-          # Start the application in the background
-          npm run start &
+          # Install a simple HTTP server for static files
+          echo "Installing http-server..."
+          npm install -g http-server
           
-          # Wait for the app to be ready with timeout and better error handling
-          echo "Waiting for application to start..."
+          # Start serving static files from dist directory
+          echo "Starting static file server..."
+          http-server dist -p 3000 --cors &
+          
+          # Wait for server to be ready with timeout and better error handling
+          echo "Waiting for static file server to start..."
           timeout 120s bash -c 'until curl -f http://localhost:3000 > /dev/null 2>&1; do sleep 2; done' || {
-            echo "Application failed to start within 120 seconds"
+            echo "Static file server failed to start within 120 seconds"
             echo "Checking if process is running:"
-            ps aux | grep "npm run start" || echo "No npm process found"
+            ps aux | grep "http-server" || echo "No http-server process found"
             echo "Checking port 3000:"
             netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
-            echo "Application logs:"
+            echo "Checking dist directory contents:"
+            ls -la dist/ || echo "dist directory not found"
+            echo "Server logs:"
             jobs
             exit 1
           }
           
-          echo "Application is ready at http://localhost:3000"
+          echo "Static file server is ready at http://localhost:3000"
           
           # Store the background process PID for later use
           echo "APP_PID=$!" >> $GITHUB_ENV
@@ -88,18 +95,21 @@ jobs:
           BASE_URL: 'https://api.example.com/v1'
           DEFAULT_MODEL: 'test-model'
 
-      - name: Verify application status
+      - name: Verify static file server status
         run: |
-          echo "Verifying application is running..."
-          curl -f http://localhost:3000 > /dev/null 2>&1 && echo "✅ Application is responding" || echo "❌ Application is not responding"
+          echo "Verifying static file server is running..."
+          curl -f http://localhost:3000 > /dev/null 2>&1 && echo "✅ Static file server is responding" || echo "❌ Static file server is not responding"
           
-          echo "Checking application process:"
-          ps aux | grep "npm run start" | grep -v grep || echo "No npm start process found"
+          echo "Checking static file server process:"
+          ps aux | grep "http-server" | grep -v grep || echo "No http-server process found"
           
           echo "Checking port 3000:"
           netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
           
-          echo "Checking application logs:"
+          echo "Checking dist directory contents:"
+          ls -la dist/ || echo "dist directory not found"
+          
+          echo "Checking server logs:"
           jobs
 
       - name: Verify Cypress configuration
@@ -162,17 +172,17 @@ jobs:
         continue-on-error: false
         timeout-minutes: 15
 
-      - name: Monitor application health during tests
+      - name: Monitor static file server health during tests
         run: |
-          echo "Monitoring application health..."
+          echo "Monitoring static file server health..."
           
-          # Check if app is still running
+          # Check if server is still running
           if [ ! -z "$APP_PID" ]; then
-            echo "Application PID: $APP_PID"
+            echo "Static file server PID: $APP_PID"
             if ps -p $APP_PID > /dev/null; then
-              echo "✅ Application process is running"
+              echo "✅ Static file server process is running"
             else
-              echo "❌ Application process is not running"
+              echo "❌ Static file server process is not running"
             fi
           fi
           
@@ -183,16 +193,16 @@ jobs:
             echo "❌ Port 3000 is not listening"
           fi
           
-          # Check application responsiveness
+          # Check server responsiveness
           if curl -f http://localhost:3000 > /dev/null 2>&1; then
-            echo "✅ Application is responding to HTTP requests"
+            echo "✅ Static file server is responding to HTTP requests"
           else
-            echo "❌ Application is not responding to HTTP requests"
+            echo "❌ Static file server is not responding to HTTP requests"
           fi
           
           # Check memory usage
           if [ ! -z "$APP_PID" ]; then
-            echo "Application memory usage:"
+            echo "Static file server memory usage:"
             ps -o pid,ppid,cmd,%mem,%cpu --no-headers -p $APP_PID 2>/dev/null || echo "Could not get process info"
           fi
           
@@ -230,14 +240,14 @@ jobs:
           retention-days: 30
         continue-on-error: true
 
-      - name: Capture application logs (on failure)
+      - name: Capture static file server logs (on failure)
         if: failure()
         run: |
-          echo "Capturing application logs due to failure..."
+          echo "Capturing static file server logs due to failure..."
           
-          # Check if application process is still running
+          # Check if static file server process is still running
           if [ ! -z "$APP_PID" ]; then
-            echo "Application PID: $APP_PID"
+            echo "Static file server PID: $APP_PID"
             ps -p $APP_PID > /dev/null && echo "Process still running" || echo "Process not running"
           fi
           
@@ -252,6 +262,10 @@ jobs:
           # Check if port is still listening
           echo "Port 3000 status:"
           netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
+          
+          # Check dist directory contents
+          echo "Dist directory contents:"
+          ls -la dist/ || echo "dist directory not found"
         continue-on-error: true
 
       - name: Test Results Summary
