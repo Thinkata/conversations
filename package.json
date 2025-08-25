@@ -16,7 +16,10 @@
     "test:e2e": "cypress run --spec 'cypress/e2e/**/*.cy.ts'",
     "test:security": "cypress run --spec 'cypress/e2e/security.cy.ts'",
     "test:functionality": "cypress run --spec 'cypress/e2e/functionality.cy.ts'",
-    "test:regression": "cypress run --spec 'cypress/e2e/regression.cy.ts'"
+    "test:regression": "cypress run --spec 'cypress/e2e/regression.cy.ts'",
+    "deploy:netlify": "bash scripts/deploy-netlify.sh",
+    "deploy:netlify:preview": "netlify deploy --dir=.output/public",
+    "netlify:dev": "netlify dev"
   },
   "dependencies": {
     "@iconify-json/heroicons": "^1.1.21",

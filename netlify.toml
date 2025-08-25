@@ -1,0 +1,75 @@
+[build]
+  # Build command for Nuxt 3
+  command = "npm run build"
+  
+  # Publish directory (Nuxt 3 static output)
+  publish = ".output/public"
+  
+  # Environment variables for build
+  [build.environment]
+    NODE_VERSION = "20.19.0"
+    NPM_VERSION = "10.0.0"
+
+[build.processing]
+  # Enable image optimization
+  image = true
+  
+  # Enable CSS optimization
+  css = true
+  
+  # Enable JS optimization
+  js = true
+  
+  # Enable HTML optimization
+  html = true
+
+# Redirects for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# Headers for static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Headers for API routes
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Environment-specific settings
+[context.deploy-preview]
+  command = "npm run build"
+  publish = ".output/public"
+
+[context.branch-deploy]
+  command = "npm run build"
+  publish = ".output/public"
+
+# Functions configuration (if you want to use Netlify Functions)
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Edge functions configuration
+[[edge_functions]]
+  path = "/api/*"
+  function = "api-proxy"
+
+[[edge_functions]]
+  path = "/auth/*"
+  function = "auth"

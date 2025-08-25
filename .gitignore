@@ -115,3 +115,8 @@ cypress/fixtures/test-*.png
 cypress/fixtures/test-*.jpg
 cypress/fixtures/test-*.jpeg
 cypress/fixtures/test-*.gif
+
+# Netlify deployment files (exclude from GitHub)
+netlify.env
+.netlify/
+.netlifyignore
