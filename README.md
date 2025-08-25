@@ -1,6 +1,6 @@
 # Conversations - AI Chat Application
 
-A sophisticated, responsive chat application built with Nuxt 4 for seamless interaction with AI models through OpenAI-compatible APIs. Features an advanced chat management system with support for text and multimodal conversations, persistent chat history, and a modern conversational interface.
+A sophisticated, responsive chat application built with **Nuxt 4** for seamless interaction with AI models through OpenAI-compatible APIs. Features an advanced chat management system with support for text and multimodal conversations, persistent chat history, and a modern conversational interface with enterprise-grade security.
 
 ![Nuxt](https://img.shields.io/badge/Nuxt-4.0-00DC82?style=flat&logo=nuxt.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat&logo=typescript&logoColor=white)
@@ -21,8 +21,8 @@ A sophisticated, responsive chat application built with Nuxt 4 for seamless inte
 - 💾 **Persistent Chat History** - Local storage-based chat persistence with export functionality
 - 🎨 **Modern UI** - Built with Nuxt UI and Tailwind CSS with dark/light mode support
 - 🔍 **Chat Search & Filter** - Find conversations quickly with built-in search functionality
-- ✅ **Comprehensive Testing** - Full E2E test suite with Cypress for reliability
-- 🛡️ **Security Features** - XSS protection with DOMPurify and secure file handling
+- ✅ **Comprehensive Testing** - Full E2E test suite with Cypress for reliability (46+ tests)
+- 🛡️ **Enterprise Security** - XSS protection, rate limiting, security headers, input validation
 - 🧠 **Intelligent Model Selection** - Automatic capability detection and model recommendations
 - 🔄 **Provider Agnostic** - Switch between AI providers without code changes
 - 📊 **Smart Context Management** - Adaptive context windows based on model capabilities
@@ -56,17 +56,17 @@ A sophisticated, responsive chat application built with Nuxt 4 for seamless inte
    Edit `.env` and add your API credentials:
    ```env
    API_KEY=your_api_key_here
-   BASE_URL=https://api.lambda.ai/v1
-   DEFAULT_MODEL=deepseek-r1-671b
+   BASE_URL=https://api.openai.com/v1
+   DEFAULT_MODEL=gpt-4o-mini
    ```
    
    **OpenAI-Compatible Services:**
    ```env
+   # OpenAI (Default)
+   BASE_URL=https://api.openai.com/v1
+   
    # Lambda AI
    BASE_URL=https://api.lambda.ai/v1
-   
-   # OpenAI
-   BASE_URL=https://api.openai.com/v1
    
    # Local/Self-hosted (e.g., Ollama, LM Studio)
    BASE_URL=http://localhost:11434/v1
@@ -91,7 +91,7 @@ Conversations supports extensive configuration through environment variables sto
 
 **Set Default Model for New Chats:**
 ```bash
-DEFAULT_MODEL=llama3.1-8b-instruct
+DEFAULT_MODEL=gpt-4o-mini
 ```
 
 **Add Default System Prompt:**
@@ -214,24 +214,29 @@ const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
 chat/
 ├── components/
 │   ├── ChatForm.vue          # Main chat interface & management
-│   └── MarkdownRenderer.vue  # Rich text rendering component
+│   ├── MarkdownRenderer.vue  # Rich text rendering component
+│   └── ErrorBoundary.vue     # Error handling and recovery
 ├── composables/
 │   ├── useDefaultModel.ts    # Default model configuration
 │   └── useModels.ts          # Model management composable
 ├── pages/
 │   └── index.vue             # Application entry point
 ├── server/
-│   └── api/
-│       ├── chat.post.ts      # Multi-modal AI API integration
-│       └── models.get.ts     # Dynamic model capability detection
+│   ├── api/
+│   │   ├── chat.post.ts      # Multi-modal AI API integration
+│   │   └── models.get.ts     # Dynamic model capability detection
+│   └── middleware/
+│       ├── rate-limit.ts     # Rate limiting protection
+│       └── validate-request.ts # Request validation middleware
 ├── utils/
 │   └── dateUtils.ts          # Date formatting utilities
 ├── assets/
 │   └── css/
 │       └── tailwind.css      # Global styling
 ├── cypress/
-│   └── e2e/                  # End-to-end test suites
-├── nuxt.config.ts            # Nuxt configuration
+│   ├── e2e/                  # End-to-end test suites
+│   └── TESTING_STRATEGY.md   # Testing approach documentation
+├── nuxt.config.ts            # Nuxt configuration with security headers
 └── package.json              # Dependencies & scripts
 ```
 
@@ -242,8 +247,8 @@ chat/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `API_KEY` | Your API key for OpenAI-compatible service | *Required* |
-| `BASE_URL` | OpenAI-compatible API endpoint | `https://api.lambda.ai/v1` |
-| `DEFAULT_MODEL` | Default model for new chats | `deepseek-r1-671b` |
+| `BASE_URL` | OpenAI-compatible API endpoint | `https://api.openai.com/v1` |
+| `DEFAULT_MODEL` | Default model for new chats | `gpt-4o-mini` |
 | `APP_NAME` | Application display name | `Conversations` |
 | `DEFAULT_SYSTEM_PROMPT` | Default system prompt | *(empty)* |
 | `ENABLE_IMAGE_UPLOAD` | Enable/disable image uploads | `true` |
@@ -297,18 +302,37 @@ Models are dynamically loaded from the `/api/models` endpoint. To add or modify 
 - **Performance optimization**: CI/CD-friendly testing and deployment optimizations
 
 ### **🔒 Enterprise-Grade Security & Reliability**
-- **XSS protection**: DOMPurify integration for safe HTML rendering
-- **Secure file handling**: Safe base64 encoding with size limits and validation
-- **Comprehensive testing**: 47+ E2E tests covering functionality, security, and performance
-- **CI/CD optimization**: Built-in GitHub Actions for reliable deployment
+- **Comprehensive security headers**: XSS protection, clickjacking prevention, CSP enforcement
+- **Rate limiting & abuse prevention**: 30 requests/minute per IP with automatic cleanup
+- **Input validation & sanitization**: Server-side validation with XSS protection via DOMPurify
+- **Secure file handling**: Safe base64 encoding with size limits and signature validation
+- **Comprehensive testing**: 46+ E2E tests covering functionality, security, and performance
+- **CI/CD optimization**: Built-in GitHub Actions for reliable deployment and security validation
 
-## 🛡️ Security
+## 🛡️ Enterprise Security Features
 
-- **Server-side API Keys**: API keys are stored server-side only with no client exposure
-- **XSS Protection**: DOMPurify integration prevents malicious HTML/script injection
-- **Secure File Handling**: Safe base64 encoding for image uploads with size limits
-- **Environment-based Config**: Sensitive configuration through environment variables
-- **Comprehensive Testing**: Security-focused E2E tests validate protection mechanisms
+### **Security Headers & Protection**
+- **Comprehensive Security Headers**: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection
+- **Content Security Policy**: Strict CSP with frame-ancestors 'none' for clickjacking protection
+- **Permissions Policy**: Restricts camera, microphone, and geolocation access
+- **Referrer Policy**: Strict origin control for privacy protection
+
+### **API Security & Rate Limiting**
+- **Server-side API Keys**: API keys stored server-side only with no client exposure
+- **Rate Limiting**: 30 requests per minute per IP to prevent abuse
+- **Request Validation**: Content-Type and size validation (10MB max)
+- **Input Sanitization**: XSS protection with DOMPurify and server-side validation
+
+### **File Upload Security**
+- **Safe File Handling**: Secure base64 encoding with size limits and validation
+- **Type Validation**: Strict image file type checking
+- **Size Limits**: Configurable maximum file size (default: 10MB)
+- **Signature Validation**: File signature verification for security
+
+### **Testing & Validation**
+- **Security Testing**: 16 comprehensive security tests covering all protection mechanisms
+- **Automated Validation**: GitHub Actions integration for continuous security verification
+- **Environment Isolation**: Different security configurations for dev/prod environments
 
 ## 🎨 Customization
 
@@ -374,13 +398,15 @@ npm run test:security      # Security validation tests
 npm run test:e2e           # Full end-to-end tests
 ```
 
+**Testing Strategy**: See `cypress/TESTING_STRATEGY.md` for detailed information about how security tests work across different environments (development, static build, and production deployment).
+
 ### 🚀 **Automated Testing with GitHub Actions**
 
 The project includes automated testing via GitHub Actions that run on every push and pull request.
 
 #### **Workflow Features**
 - **Automatic Execution**: Runs on every push to `main`/`develop` and all PRs
-- **Complete Test Coverage**: All 47 tests (33 functionality + 14 security)
+- **Complete Test Coverage**: All 46+ tests (30+ functionality + 16 security)
 - **Build Verification**: Ensures the application builds successfully
 - **Failure Artifacts**: Captures screenshots and videos on test failures
 - **Detailed Reporting**: Provides comprehensive test result summaries
@@ -402,7 +428,7 @@ The project includes automated testing via GitHub Actions that run on every push
 - **Error Handling**: API failures and edge cases
 - **Accessibility**: ARIA labels and keyboard navigation
 - **Performance**: Large messages and rapid interactions
-- **Security**: XSS protection, input validation, file security
+- **Security**: XSS protection, input validation, file security, rate limiting
 
 #### **Workflow File Location**
 ```
@@ -423,9 +449,11 @@ For API-related issues, refer to your provider's documentation:
 - ✅ **Intelligent model selection** - Automatic capability detection and recommendations
 - ✅ **Advanced context management** - Smart context windows and memory optimization
 - ✅ **Comprehensive export/import** - Full conversation portability with metadata
-- ✅ **Modern tech stack** - Nuxt 3 + Vue 3 + TypeScript for performance
-- ✅ **Enterprise security** - XSS protection, secure file handling, comprehensive testing
+- ✅ **Modern tech stack** - Nuxt 4 + Vue 3 + TypeScript for performance
+- ✅ **Enterprise security** - Comprehensive security headers, rate limiting, input validation
 - ✅ **Real-time chat management** - Intelligent organization with automatic fallbacks
+- ✅ **Security middleware** - Rate limiting, request validation, and abuse prevention
+- ✅ **Error handling** - Graceful error recovery with user-friendly messages
 
 ### 🚀 **Upcoming Features & Market Expansion**
 - [ ] **Response Streaming** - Real-time token streaming for faster perceived response times
