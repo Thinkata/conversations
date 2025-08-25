@@ -7,8 +7,6 @@ export default defineEventHandler(async (event) => {
     const apiKey = runtimeConfig.API_KEY
     const baseURL = runtimeConfig.BASE_URL
 
-    console.log('baseURL', baseURL)
-
     if (!apiKey) {
       throw createError({ 
         statusCode: 500, 

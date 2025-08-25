@@ -3,9 +3,20 @@ export default defineNuxtConfig({
   modules: ['@nuxt/ui'],
   devtools: { enabled: true },
   css: ['~/assets/css/tailwind.css'],
+  
+  // Enable SSR for API routes
+  ssr: true,
+  
   nitro: {
-    compatibilityDate: '2025-08-09'
+    preset: 'netlify',
+    compatibilityDate: '2025-08-09',
+    prerender: {
+      routes: ['/'],
+      crawlLinks: true,
+      failOnError: false
+    }
   },
+  
   colorMode: {
     preference: 'light'
   },

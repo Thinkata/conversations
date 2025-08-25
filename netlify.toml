@@ -1,75 +1,62 @@
 [build]
-  # Build command for Nuxt 3
   command = "npm run build"
-  
-  # Publish directory (Nuxt 3 static output)
-  publish = ".output/public"
-  
-  # Environment variables for build
-  [build.environment]
-    NODE_VERSION = "20.19.0"
-    NPM_VERSION = "10.0.0"
+  publish = "dist"
 
-[build.processing]
-  # Enable image optimization
-  image = true
-  
-  # Enable CSS optimization
-  css = true
-  
-  # Enable JS optimization
-  js = true
-  
-  # Enable HTML optimization
-  html = true
+# Header rules for proper Content-Type
+[[headers]]
+  for = "/_nuxt/*.js"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
 
-# Redirects for SPA routing
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+[[headers]]
+  for = "/_nuxt/*.css"
+  [headers.values]
+    Content-Type = "text/css; charset=utf-8"
 
-# Headers for security and performance
+[[headers]]
+  for = "/_nuxt/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Content-Type = "text/css; charset=utf-8"
+
+[[headers]]
+  for = "*.json"
+  [headers.values]
+    Content-Type = "application/json; charset=utf-8"
+
+[[headers]]
+  for = "/_nuxt/builds/meta/*"
+  [headers.values]
+    cache-control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/_nuxt/builds/*"
+  [headers.values]
+    cache-control = "public, max-age=1, immutable"
+
+[[headers]]
+  for = "/_fonts/*"
+  [headers.values]
+    cache-control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/_nuxt/*"
+  [headers.values]
+    cache-control = "public, max-age=31536000, immutable"
+
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
-    X-XSS-Protection = "1; mode=block"
-    X-Content-Type-Options = "nosniff"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' blob: data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:; media-src 'self' blob: data:;"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-
-# Headers for static assets
-[[headers]]
-  for = "/assets/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-# Headers for API routes
-[[headers]]
-  for = "/api/*"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
-
-# Environment-specific settings
-[context.deploy-preview]
-  command = "npm run build"
-  publish = ".output/public"
-
-[context.branch-deploy]
-  command = "npm run build"
-  publish = ".output/public"
-
-# Functions configuration (if you want to use Netlify Functions)
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
-# Edge functions configuration
-[[edge_functions]]
-  path = "/api/*"
-  function = "api-proxy"
-
-[[edge_functions]]
-  path = "/auth/*"
-  function = "auth"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
