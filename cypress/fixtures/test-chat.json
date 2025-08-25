@@ -1,0 +1,22 @@
+{
+  "chats": [
+    {
+      "id": "test-chat-1",
+      "name": "Test Chat",
+      "messages": [
+        {
+          "id": "msg-1",
+          "role": "user",
+          "content": "Hello",
+          "timestamp": 1756116481664
+        }
+      ],
+      "model": "deepseek-r1-671b",
+      "systemPrompt": "",
+      "updatedAt": 1756116481664,
+      "messageCount": 1
+    }
+  ],
+  "selectedChatId": "test-chat-1",
+  "exportDate": "2025-08-25T10:08:01.664Z"
+}

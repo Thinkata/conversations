@@ -1,0 +1,276 @@
+name: Cypress Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  cypress-run:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          # Verify package-lock.json exists
+          if [ ! -f "package-lock.json" ]; then
+            echo "❌ package-lock.json not found!"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "✅ package-lock.json found, proceeding with clean install"
+          
+          # Clear any existing modules to avoid native binding conflicts
+          rm -rf node_modules
+          
+          # Install dependencies using existing package-lock.json for reproducible builds
+          npm ci
+
+      - name: Verify environment
+        run: |
+          echo "Node.js version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "Working directory: $(pwd)"
+          echo "Available memory: $(free -h || echo 'Memory info not available')"
+
+      - name: Build application
+        run: |
+          echo "Building application..."
+          npm run build
+          
+          echo "Checking build output..."
+          ls -la .nuxt/ || echo "No .nuxt directory found"
+          ls -la .output/ || echo "No .output directory found"
+          
+          echo "Build completed successfully"
+        env:
+          # Set minimal environment variables for build
+          API_KEY: 'test-key'
+          BASE_URL: 'https://api.example.com/v1'
+          DEFAULT_MODEL: 'test-model'
+
+      - name: Start application
+        run: |
+          # Start the application in the background
+          npm run start &
+          
+          # Wait for the app to be ready with timeout and better error handling
+          echo "Waiting for application to start..."
+          timeout 120s bash -c 'until curl -f http://localhost:3000 > /dev/null 2>&1; do sleep 2; done' || {
+            echo "Application failed to start within 120 seconds"
+            echo "Checking if process is running:"
+            ps aux | grep "npm run start" || echo "No npm process found"
+            echo "Checking port 3000:"
+            netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
+            echo "Application logs:"
+            jobs
+            exit 1
+          }
+          
+          echo "Application is ready at http://localhost:3000"
+          
+          # Store the background process PID for later use
+          echo "APP_PID=$!" >> $GITHUB_ENV
+        env:
+          API_KEY: 'test-key'
+          BASE_URL: 'https://api.example.com/v1'
+          DEFAULT_MODEL: 'test-model'
+
+      - name: Verify application status
+        run: |
+          echo "Verifying application is running..."
+          curl -f http://localhost:3000 > /dev/null 2>&1 && echo "✅ Application is responding" || echo "❌ Application is not responding"
+          
+          echo "Checking application process:"
+          ps aux | grep "npm run start" | grep -v grep || echo "No npm start process found"
+          
+          echo "Checking port 3000:"
+          netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
+          
+          echo "Checking application logs:"
+          jobs
+
+      - name: Verify Cypress configuration
+        run: |
+          echo "Checking Cypress configuration..."
+          npx cypress verify || echo "Cypress verification failed"
+          
+          echo "Checking Cypress version:"
+          npx cypress --version || echo "Could not get Cypress version"
+          
+          echo "Checking if test files exist:"
+          ls -la cypress/e2e/ || echo "Cypress e2e directory not found"
+          
+          echo "Checking Cypress config:"
+          cat cypress.config.ts || echo "Cypress config not found"
+          
+          echo "Checking test file sizes:"
+          wc -l cypress/e2e/*.cy.ts || echo "Could not count test file lines"
+          
+          echo "Estimated test count:"
+          grep -r "it(" cypress/e2e/ | wc -l || echo "Could not count test cases"
+
+      - name: Run Cypress tests (Functionality)
+        uses: cypress-io/github-action@v6
+        with:
+          browser: chrome
+          headless: true
+          record: false
+          spec: cypress/e2e/functionality.cy.ts
+          wait-on: 'http://localhost:3000'
+          wait-on-timeout: 120
+          config-file: cypress.config.ts
+          env: |
+            CI=true
+            NODE_ENV=test
+            # Increase timeouts for CI environment
+            CYPRESS_DEFAULT_COMMAND_TIMEOUT=10000
+            CYPRESS_REQUEST_TIMEOUT=10000
+            CYPRESS_RESPONSE_TIMEOUT=10000
+        continue-on-error: false
+        timeout-minutes: 15
+
+      - name: Run Cypress tests (Security)
+        uses: cypress-io/github-action@v6
+        with:
+          browser: chrome
+          headless: true
+          record: false
+          spec: cypress/e2e/security.cy.ts
+          wait-on: 'http://localhost:3000'
+          wait-on-timeout: 120
+          config-file: cypress.config.ts
+          env: |
+            CI=true
+            NODE_ENV=test
+            # Increase timeouts for CI environment
+            CYPRESS_DEFAULT_COMMAND_TIMEOUT=10000
+            CYPRESS_REQUEST_TIMEOUT=10000
+            CYPRESS_RESPONSE_TIMEOUT=10000
+        continue-on-error: false
+        timeout-minutes: 15
+
+      - name: Monitor application health during tests
+        run: |
+          echo "Monitoring application health..."
+          
+          # Check if app is still running
+          if [ ! -z "$APP_PID" ]; then
+            echo "Application PID: $APP_PID"
+            if ps -p $APP_PID > /dev/null; then
+              echo "✅ Application process is running"
+            else
+              echo "❌ Application process is not running"
+            fi
+          fi
+          
+          # Check if port is still listening
+          if netstat -tlnp | grep :3000 > /dev/null; then
+            echo "✅ Port 3000 is listening"
+          else
+            echo "❌ Port 3000 is not listening"
+          fi
+          
+          # Check application responsiveness
+          if curl -f http://localhost:3000 > /dev/null 2>&1; then
+            echo "✅ Application is responding to HTTP requests"
+          else
+            echo "❌ Application is not responding to HTTP requests"
+          fi
+          
+          # Check memory usage
+          if [ ! -z "$APP_PID" ]; then
+            echo "Application memory usage:"
+            ps -o pid,ppid,cmd,%mem,%cpu --no-headers -p $APP_PID 2>/dev/null || echo "Could not get process info"
+          fi
+          
+          # Check disk space
+          echo "Available disk space:"
+          df -h . || echo "Could not check disk space"
+
+      - name: Upload screenshots (on failure)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cypress-screenshots
+          path: cypress/screenshots/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Upload videos (on failure)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cypress-videos
+          path: cypress/videos/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Upload build logs (on failure)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-logs
+          path: |
+            .nuxt/
+            .output/
+            node_modules/.cache/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Capture application logs (on failure)
+        if: failure()
+        run: |
+          echo "Capturing application logs due to failure..."
+          
+          # Check if application process is still running
+          if [ ! -z "$APP_PID" ]; then
+            echo "Application PID: $APP_PID"
+            ps -p $APP_PID > /dev/null && echo "Process still running" || echo "Process not running"
+          fi
+          
+          # Check for any error logs
+          echo "Checking for error logs..."
+          find . -name "*.log" -type f 2>/dev/null | head -10 || echo "No log files found"
+          
+          # Check system logs
+          echo "Recent system messages:"
+          dmesg | tail -20 2>/dev/null || echo "Could not access system logs"
+          
+          # Check if port is still listening
+          echo "Port 3000 status:"
+          netstat -tlnp | grep :3000 || echo "Port 3000 not listening"
+        continue-on-error: true
+
+      - name: Test Results Summary
+        if: always()
+        run: |
+          echo "## 🧪 Cypress Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- **Functionality Tests**: 33 tests covering chat management, file upload, export/import, markdown rendering, error handling, accessibility, and performance" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Tests**: 14 tests covering XSS protection, file upload security, input validation, local storage security, and API security" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Tests**: 47" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Features Tested" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Chat creation, deletion, and management" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Message sending and AI responses" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Image upload and processing" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Export/import functionality" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Markdown rendering with syntax highlighting" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ XSS protection and security measures" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Error handling and validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All tests run automatically on every push and pull request to ensure code quality and security." >> $GITHUB_STEP_SUMMARY

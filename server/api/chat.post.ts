@@ -1,14 +1,35 @@
 import { OpenAI } from 'openai'
+import crypto from 'node:crypto'
 
 type RequestBody = {
   prompt: string
   model: string
-  imageUrl?: string | null
+  images?: string[] | null
+  audios?: string[] | null
+  conversationId?: string | null
+  systemPrompt?: string | null
+  messages?: Array<{
+    role: 'user' | 'assistant'
+    content: string
+    images?: string[]
+  }> | null
+}
+
+const MAX_CONTEXT_MESSAGES = 10
+
+function parseDataUrl(dataUrl: string) {
+  const m = dataUrl.match(/^data:(.+?);base64,(.*)$/)
+  if (!m) throw new Error('Invalid data URL')
+  const mime = m[1]
+  const base64 = m[2]
+  let format = mime.split('/')[1] || 'wav'
+  if (format === 'mpeg') format = 'mp3'
+  return { base64, format }
 }
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
-  const { prompt, model, imageUrl } = body || {}
+  const { prompt, model, images, audios, conversationId, systemPrompt, messages } = body || {}
 
   // Validate required fields
   if (!prompt || !prompt.trim()) {
@@ -27,49 +48,96 @@ export default defineEventHandler(async (event) => {
 
   // Get configuration
   const runtimeConfig = useRuntimeConfig()
-  const apiKey = runtimeConfig.LAMBDA_API_KEY
-  const baseURL = runtimeConfig.LAMBDA_BASE_URL || 'https://api.lambda.ai/v1'
+  const apiKey = runtimeConfig.API_KEY
+  const baseURL = runtimeConfig.BASE_URL
 
   if (!apiKey) {
     throw createError({ 
       statusCode: 500, 
-      statusMessage: 'Lambda API key not configured. Please set LAMBDA_API_KEY environment variable.' 
+      statusMessage: 'API key not configured. Please set API_KEY environment variable.' 
     })
   }
 
-  // Initialize OpenAI client with Lambda AI endpoint
-  const client = new OpenAI({
-    apiKey,
-    baseURL
-  })
+  // Initialize OpenAI client with AI endpoint
+  const client = new OpenAI({ apiKey, baseURL })
 
   try {
-    // Build message content - support both text-only and multimodal
-    const content: any[] = [
-      { type: 'text', text: prompt }
-    ]
+    // Use frontend's message history instead of backend storage
+    const existingId = conversationId && conversationId.trim().length > 0 ? conversationId.trim() : crypto.randomUUID()
 
-    // Add image if provided
-    if (imageUrl && imageUrl.trim()) {
-      content.push({
-        type: 'image_url',
-        image_url: { url: imageUrl.trim() }
+    // Build user message content - support text + multimodal
+    const content: any[] = [{ type: 'text', text: prompt }]
+
+    if (images && images.length > 0) {
+      for (const imageData of images) {
+        if (imageData && imageData.trim()) {
+          content.push({ type: 'image_url', image_url: { url: imageData.trim() } })
+        }
+      }
+    }
+
+    if (audios && audios.length > 0) {
+      for (const audioDataUrl of audios) {
+        if (!audioDataUrl?.trim()) continue
+        const { base64, format } = parseDataUrl(audioDataUrl.trim())
+        content.push({ type: 'input_audio', input_audio: { data: base64, format } })
+      }
+    }
+
+    // Prepare context window using frontend's message history
+    const historyForContext: { role: 'system' | 'user' | 'assistant'; content: any }[] = []
+
+    // Add per-chat system prompt if provided
+    if (systemPrompt && systemPrompt.trim().length > 0) {
+      historyForContext.push({
+        role: 'system',
+        content: [{ type: 'text', text: systemPrompt.trim() }]
       })
     }
-
-    // Create message
-    const message = {
-      role: 'user' as const,
-      content
+    
+    // Add frontend's message history (excluding the current prompt)
+    if (messages && messages.length > 0) {
+      // Use the last MAX_CONTEXT_MESSAGES from the frontend history
+      const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
+      
+      for (const msg of recentMessages) {
+        // Handle messages with images
+        if (msg.images && msg.images.length > 0) {
+          const content: any[] = [{ type: 'text', text: msg.content }]
+          for (const imageData of msg.images) {
+            if (imageData && imageData.trim()) {
+              content.push({ type: 'image_url', image_url: { url: imageData.trim() } })
+            }
+          }
+          historyForContext.push({ 
+            role: msg.role, 
+            content: content
+          })
+        } else {
+          // Text-only messages
+          historyForContext.push({ 
+            role: msg.role, 
+            content: [{ type: 'text', text: msg.content }]
+          })
+        }
+      }
     }
 
-    // Call Lambda AI API
+    // Append current user message
+    historyForContext.push({ role: 'user', content })
+
+    // Call AI API
     const chatResponse = await client.chat.completions.create({
       model: model.trim(),
-      messages: [message],
-      max_tokens: 4000, // Reasonable limit
-      temperature: 0.7  // Balanced creativity
+      messages: historyForContext,
+      //max_tokens: 2048,
+      //temperature: 0.7
     })
+
+    // Basic token usage logging (SDK returns usage for many providers)
+    const usage = (chatResponse as any)?.usage
+    const promptTokens = usage?.prompt_tokens ?? usage?.input_tokens
+    const completionTokens = usage?.completion_tokens ?? usage?.output_tokens
 
     // Extract response content
     const responseContent = chatResponse.choices?.[0]?.message?.content || ''
@@ -81,15 +149,12 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    return {
-      success: true,
-      content: responseContent,
-      model: model,
-      usage: chatResponse.usage
-    }
+    // No need to persist conversation on backend - frontend handles storage
+
+    return { success: true, content: responseContent, model: model, usage: chatResponse.usage, conversationId: existingId }
 
   } catch (error: any) {
-    console.error('Lambda AI API Error:', error)
+    console.error('AI API Error:', error)
     
     // Handle different types of errors
     if (error.status) {
@@ -113,3 +178,4 @@ export default defineEventHandler(async (event) => {
     }
   }
 })
+

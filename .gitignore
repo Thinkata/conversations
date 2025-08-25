@@ -106,3 +106,12 @@ jspm_packages/
 # Temporary folders
 tmp/
 temp/
+
+# Cypress test artifacts
+cypress/screenshots/
+cypress/videos/
+cypress/downloads/
+cypress/fixtures/test-*.png
+cypress/fixtures/test-*.jpg
+cypress/fixtures/test-*.jpeg
+cypress/fixtures/test-*.gif
