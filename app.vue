@@ -18,6 +18,28 @@
             <div class="text-lg font-semibold text-gray-800">
               {{ selectedChat?.name || 'Select a chat' }}
             </div>
+            <!-- Storage Status Indicator -->
+            <div class="flex items-center space-x-2 text-xs">
+              <div 
+                class="w-2 h-2 rounded-full"
+                :class="storageStatus.isHigh ? 'bg-yellow-500' : 'bg-green-500'"
+              ></div>
+              <span class="text-gray-600 dark:text-gray-400">
+                {{ storageStatus.sizeInMB || '0.00' }}MB
+              </span>
+              <UButton
+                v-if="storageStatus.isHigh"
+                @click="cleanupOldChats(3)"
+                color="yellow"
+                variant="ghost"
+                size="xs"
+                icon="i-heroicons-trash"
+                title="Clean up old chats to free storage space"
+                class="ml-2"
+              >
+                Cleanup
+              </UButton>
+            </div>
           </div>
         </div>
         <div class="flex items-center space-x-3">
@@ -77,6 +99,44 @@
         </p>
       </div>
     </div>
+
+    <!-- Storage Warning Notification -->
+    <UModal 
+      v-model:open="showStorageWarning"
+      title="Storage Warning"
+      description="Storage space is running low"
+    >
+      <template #body>
+        <div class="p-4">
+          <div class="flex items-center space-x-3">
+            <UIcon name="i-heroicons-exclamation-triangle" class="h-6 w-6 text-yellow-500" />
+            <div>
+              <p class="text-gray-700 dark:text-gray-300">{{ storageWarningMessage }}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                Consider cleaning up old chats or removing attached images to free up space.
+              </p>
+            </div>
+          </div>
+          <div class="mt-4 flex space-x-3">
+            <UButton
+              @click="cleanupOldChats(3)"
+              color="yellow"
+              variant="solid"
+              icon="i-heroicons-trash"
+            >
+              Clean Up Old Chats
+            </UButton>
+            <UButton
+              @click="showStorageWarning = false"
+              color="gray"
+              variant="ghost"
+            >
+              Dismiss
+            </UButton>
+          </div>
+        </div>
+      </template>
+    </UModal>
 
     <!-- Export Modal -->
     <UModal 
@@ -198,6 +258,10 @@ const isInitialLoad = ref(true)
 // Modal states
 const showExportModal = ref(false)
 
+// Storage notification state
+const showStorageWarning = ref(false)
+const storageWarningMessage = ref('')
+
 // Refs
 const importInput = ref<HTMLInputElement | null>(null)
 
@@ -206,12 +270,58 @@ const selectedChat = computed(() =>
   chats.value.find(chat => chat.id === selectedChatId.value)
 )
 
+// Storage status for UI display
+const storageStatus = computed(() => {
+  if (process.client && typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const currentData = localStorage.getItem('chat-data')
+      if (currentData) {
+        const sizeInBytes = new Blob([currentData]).size
+        const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2)
+        
+        return {
+          sizeInBytes,
+          sizeInMB,
+          isHigh: sizeInBytes > 3 * 1024 * 1024 // 3MB threshold
+        }
+      }
+    } catch (error) {
+      console.error('[Storage] Error computing storage status:', error)
+    }
+  }
+  return {
+    sizeInBytes: 0,
+    sizeInMB: '0.00',
+    isHigh: false
+  }
+})
+
 // Initialize
 onMounted(async () => {
   // Ensure we're on the client side
   if (process.client) {
     console.log('[App] onMounted - starting to load chats')
     await loadChatsFromStorage()
+    
+    // Set up periodic storage check
+    const storageCheckInterval = setInterval(() => {
+      if (process.client) {
+        checkStorageUsage()
+      }
+    }, 30000) // Check every 30 seconds
+    
+    // Set up periodic cleanup of old messages
+    const cleanupInterval = setInterval(() => {
+      if (process.client && chats.value.length > 0) {
+        cleanupOldMessages()
+      }
+    }, 300000) // Check every 5 minutes
+    
+    // Clean up intervals on unmount
+    onUnmounted(() => {
+      clearInterval(storageCheckInterval)
+      clearInterval(cleanupInterval)
+    })
   } else {
     console.log('[App] onMounted - server side, skipping localStorage operations')
   }
@@ -300,27 +410,246 @@ function createNewChat() {
 // Storage functions - use the same format as export/import
 function saveChatsToStorage() {
   if (process.client && typeof window !== 'undefined' && window.localStorage) {
-    // Use the same format as export - unified storage system
-    const storageData = {
-      chats: chats.value,
-      selectedChatId: selectedChatId.value,
-      exportDate: new Date().toISOString()
+    try {
+      // Use the same format as export - unified storage system
+      const storageData = {
+        chats: chats.value,
+        selectedChatId: selectedChatId.value,
+        exportDate: new Date().toISOString()
+      }
+      
+      console.log('[Save] Saving to localStorage:', {
+        chatsCount: chats.value.length,
+        selectedChatId: selectedChatId.value,
+        exportDate: storageData.exportDate
+      })
+      
+      // Try to save the complete data structure to localStorage
+      const dataString = JSON.stringify(storageData)
+      
+      // Check if data is too large before attempting to save
+      if (dataString.length > 4 * 1024 * 1024) { // 4MB threshold
+        console.warn('[Save] Data size exceeds 4MB, attempting cleanup...')
+        
+        // Try to clean up old chats to reduce size
+        const cleanedData = cleanupChatsForStorage(storageData)
+        const cleanedString = JSON.stringify(cleanedData)
+        
+        if (cleanedString.length > 4 * 1024 * 1024) {
+          console.error('[Save] Data still too large after cleanup, truncating messages...')
+          const truncatedData = truncateMessagesForStorage(cleanedData)
+          const truncatedString = JSON.stringify(truncatedData)
+          
+          if (truncatedString.length > 4 * 1024 * 1024) {
+            throw new Error('Data too large even after cleanup and truncation')
+          }
+          
+          localStorage.setItem('chat-data', truncatedString)
+          console.log('[Save] Successfully saved truncated data to localStorage')
+        } else {
+          localStorage.setItem('chat-data', cleanedString)
+          console.log('[Save] Successfully saved cleaned data to localStorage')
+        }
+      } else {
+        // Save the complete data structure to localStorage
+        localStorage.setItem('chat-data', dataString)
+        console.log('[Save] Successfully saved to localStorage')
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'QuotaExceededError') {
+        console.error('[Save] localStorage quota exceeded, attempting emergency cleanup...')
+        handleStorageQuotaExceeded()
+      } else {
+        console.error('[Save] Error saving to localStorage:', error)
+      }
     }
-    
-    console.log('[Save] Saving to localStorage:', {
-      chatsCount: chats.value.length,
-      selectedChatId: selectedChatId.value,
-      exportDate: storageData.exportDate
-    })
-    
-    // Save the complete data structure to localStorage
-    localStorage.setItem('chat-data', JSON.stringify(storageData))
-    
-    console.log('[Save] Successfully saved to localStorage')
   }
 }
 
+// Clean up chats to reduce storage size
+function cleanupChatsForStorage(storageData: any) {
+  const cleanedData = { ...storageData }
+  
+  // Sort chats by updatedAt (newest first) and keep only the most recent ones
+  const sortedChats = [...storageData.chats].sort((a, b) => b.updatedAt - a.updatedAt)
+  
+  // Keep only the 5 most recent chats to reduce size
+  cleanedData.chats = sortedChats.slice(0, 5)
+  
+  // If the selected chat was removed, select the first available chat
+  if (cleanedData.selectedChatId && !cleanedData.chats.find((chat: any) => chat.id === cleanedData.selectedChatId)) {
+    cleanedData.selectedChatId = cleanedData.chats[0]?.id || null
+  }
+  
+  console.log('[Save] Cleaned chats from', storageData.chats.length, 'to', cleanedData.chats.length)
+  return cleanedData
+}
 
+// Truncate message content to reduce storage size
+function truncateMessagesForStorage(storageData: any) {
+  const truncatedData = { ...storageData }
+  
+  truncatedData.chats = truncatedData.chats.map((chat: any) => ({
+    ...chat,
+    messages: chat.messages.map((msg: any) => ({
+      ...msg,
+      // Truncate long messages to 1000 characters
+      content: msg.content.length > 1000 ? msg.content.substring(0, 1000) + '...' : msg.content,
+      // Remove image data to save space
+      images: undefined
+    }))
+  }))
+  
+  console.log('[Save] Truncated message content and removed images')
+  return truncatedData
+}
+
+// Handle localStorage quota exceeded error
+function handleStorageQuotaExceeded() {
+  try {
+    // Emergency cleanup: remove all chats except the current one
+    const currentChat = chats.value.find(chat => chat.id === selectedChatId.value)
+    
+    if (currentChat) {
+      // Keep only the current chat with minimal data
+      const emergencyData = {
+        chats: [{
+          ...currentChat,
+          messages: currentChat.messages.slice(-5), // Keep only last 5 messages
+          systemPrompt: undefined // Remove system prompt to save space
+        }],
+        selectedChatId: currentChat.id,
+        exportDate: new Date().toISOString()
+      }
+      
+      // Try to save the emergency data
+      const emergencyString = JSON.stringify(emergencyData)
+      localStorage.setItem('chat-data', emergencyString)
+      
+      // Update the local state to match what was saved
+      chats.value = emergencyData.chats
+      
+      console.log('[Save] Emergency cleanup completed, saved minimal data')
+      
+      // Show user notification about storage issue
+      showStorageWarning.value = true
+      storageWarningMessage.value = 'Storage space exceeded. Some chat history has been cleared to free up space.'
+      
+      // Auto-hide after 10 seconds
+      setTimeout(() => {
+        showStorageWarning.value = false
+      }, 10000)
+    } else {
+      // No current chat, clear everything
+      localStorage.removeItem('chat-data')
+      chats.value = []
+      selectedChatId.value = null
+      console.log('[Save] Emergency cleanup: cleared all data')
+    }
+  } catch (emergencyError) {
+    console.error('[Save] Emergency cleanup failed:', emergencyError)
+    // Last resort: clear everything
+    try {
+      localStorage.removeItem('chat-data')
+      chats.value = []
+      selectedChatId.value = null
+    } catch (finalError) {
+      console.error('[Save] Final cleanup attempt failed:', finalError)
+    }
+  }
+}
+
+// Check storage usage and provide feedback
+function checkStorageUsage() {
+  if (process.client && typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const currentData = localStorage.getItem('chat-data')
+      if (currentData) {
+        const sizeInBytes = new Blob([currentData]).size
+        const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2)
+        
+        console.log(`[Storage] Current usage: ${sizeInMB}MB`)
+        
+        // Warn if approaching limit (4MB threshold)
+        if (sizeInBytes > 3 * 1024 * 1024) { // 3MB
+          console.warn(`[Storage] Warning: Storage usage is high (${sizeInMB}MB). Consider cleaning up old chats.`)
+          
+          // Show warning notification if not already showing
+          if (!showStorageWarning.value) {
+            showStorageWarning.value = true
+            storageWarningMessage.value = `Storage usage is high (${sizeInMB}MB). Consider cleaning up old chats to free up space.`
+            
+            // Auto-hide after 15 seconds
+            setTimeout(() => {
+              showStorageWarning.value = false
+            }, 15000)
+          }
+        }
+        
+        return {
+          sizeInBytes,
+          sizeInMB,
+          isHigh: sizeInBytes > 3 * 1024 * 1024
+        }
+      }
+    } catch (error) {
+      console.error('[Storage] Error checking storage usage:', error)
+    }
+  }
+  return null
+}
+
+// Clean up old chats to free up storage space
+function cleanupOldChats(keepCount = 3) {
+  if (chats.value.length <= keepCount) {
+    console.log('[Storage] No cleanup needed, only', chats.value.length, 'chats exist')
+    return
+  }
+  
+  // Sort chats by updatedAt (newest first)
+  const sortedChats = [...chats.value].sort((a, b) => b.updatedAt - a.updatedAt)
+  
+  // Keep the most recent chats
+  const chatsToKeep = sortedChats.slice(0, keepCount)
+  
+  // Update the chats array
+  chats.value = chatsToKeep
+  
+  // Update selected chat if it was removed
+  if (selectedChatId.value && !chatsToKeep.find(chat => chat.id === selectedChatId.value)) {
+    selectedChatId.value = chatsToKeep[0]?.id || null
+  }
+  
+  console.log('[Storage] Cleaned up old chats, kept', chatsToKeep.length, 'most recent')
+  
+  // Force save the cleaned data
+  saveChatsToStorage()
+}
+
+// Clean up old messages to prevent storage bloat
+function cleanupOldMessages() {
+  let totalMessagesRemoved = 0
+  
+  chats.value.forEach(chat => {
+    if (chat.messages.length > 50) { // Keep only last 50 messages per chat
+      const messagesToRemove = chat.messages.length - 50
+      chat.messages = chat.messages.slice(-50) // Keep last 50 messages
+      totalMessagesRemoved += messagesToRemove
+      
+      // Update message count
+      chat.messageCount = chat.messages.length
+      
+      // Update timestamp
+      chat.updatedAt = Date.now()
+    }
+  })
+  
+  if (totalMessagesRemoved > 0) {
+    console.log(`[Storage] Cleaned up ${totalMessagesRemoved} old messages across all chats`)
+    // Force save after cleanup
+    saveChatsToStorage()
+  }
+}
 
 async function loadChatsFromStorage() {
   if (process.client && typeof window !== 'undefined' && window.localStorage) {
@@ -683,7 +1012,10 @@ onMounted(() => {
       },
       forceSave: () => saveChatsToStorage(),
       forceLoad: () => loadChatsFromStorage(),
-      createTestChat: () => createNewChat()
+      createTestChat: () => createNewChat(),
+      checkStorageUsage: () => checkStorageUsage(),
+      cleanupOldChats: (keepCount: number) => cleanupOldChats(keepCount),
+      cleanupOldMessages: () => cleanupOldMessages()
     }
     
     console.log('[App] Debug functions exposed to window.debugChatStorage')

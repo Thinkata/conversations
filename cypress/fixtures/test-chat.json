@@ -8,15 +8,15 @@
           "id": "msg-1",
           "role": "user",
           "content": "Hello",
-          "timestamp": 1756144873842
+          "timestamp": 1756335645735
         }
       ],
       "model": "deepseek-r1-671b",
       "systemPrompt": "",
-      "updatedAt": 1756144873842,
+      "updatedAt": 1756335645735,
       "messageCount": 1
     }
   ],
   "selectedChatId": "test-chat-1",
-  "exportDate": "2025-08-25T18:01:13.842Z"
+  "exportDate": "2025-08-27T23:00:45.735Z"
 }

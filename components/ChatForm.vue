@@ -287,14 +287,14 @@
               </div>
 
               <!-- Message Input -->
-              <div class="relative">
+              <div class="w-full relative">
                 <UTextarea
                   v-model="prompt"
                   placeholder="Message AI... (Ctrl+V/Cmd+V to paste images)"
                   :rows="1"
                   variant="none"
                   size="xl"
-                  class="resize-none border-0 focus:ring-0 focus:outline-none bg-transparent min-h-[48px] max-h-[200px] py-3 px-4 text-base leading-6"
+                  class="w-full resize-none border-0 focus:ring-0 focus:outline-none bg-transparent min-h-[48px] max-h-[200px] py-3 px-4 text-base leading-6"
                   :disabled="!selectedChat"
                   @keydown.enter.exact.prevent="sendMessage"
                   @keydown.enter.shift.exact="prompt += '\n'"
@@ -1220,13 +1220,17 @@ async function onFile(e: Event) {
 }
 
 async function processImageFile(file: File) {
+  console.log('processImageFile called with:', { name: file.name, type: file.type, size: file.size })
+  
   if (!file.type.startsWith('image/')) {
     error.value = 'Please select image files only'
+    console.log('File type check failed:', file.type)
     return
   }
   
   if (file.size > 10 * 1024 * 1024) {
     error.value = `Image "${file.name}" is too large. Please choose files under 10MB.`
+    console.log('File size check failed:', file.size)
     return
   }
   
@@ -1235,6 +1239,8 @@ async function processImageFile(file: File) {
   error.value = ''
   
   try {
+    console.log('Starting image processing for:', file.name)
+    
     // Additional file signature validation for better security
     const validImageSignatures = [
       [0xFF, 0xD8, 0xFF], // JPEG
@@ -1254,30 +1260,39 @@ async function processImageFile(file: File) {
     
     if (!isValidSignature) {
       error.value = `File "${file.name}" appears to be corrupted or not a valid image file.`
+      console.log('File signature validation failed for:', file.name)
       return
     }
     
-    // Compress large images for better performance
+    console.log('File validation passed, starting processing...')
+    
     let processedFile = file
-    if (file.size > 2 * 1024 * 1024) { // Compress if > 2MB
-      try {
-        processedFile = await compressImage(file)
-        console.log(`Image "${file.name}" compressed from ${(file.size / 1024 / 1024).toFixed(2)}MB to ${(processedFile.size / 1024 / 1024).toFixed(2)}MB`)
-      } catch (compressErr) {
-        console.warn('Image compression failed, using original:', compressErr)
-        processedFile = file
-      }
+    let dataUrl: string
+    
+    // In test environments or if compression fails, use the original file
+    try {
+      // Compress the image to reduce storage usage
+      processedFile = await compressImage(file, 1280, 720, 0.7)
+      console.log('Image compression completed:', { originalSize: file.size, compressedSize: processedFile.size })
+    } catch (compressErr) {
+      console.warn('Image compression failed, using original file:', compressErr)
+      processedFile = file
     }
     
-    const dataUrl = await readAsDataURL(processedFile)
+    dataUrl = await readAsDataURL(processedFile)
+    console.log('Data URL created, length:', dataUrl.length)
+    
     const imageId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    console.log('Generated image ID:', imageId)
     
     // Check if we already have too many images
     if (attachedImages.value.length >= 10) {
       error.value = 'Maximum 10 images allowed. Please remove some before adding more.'
+      console.log('Too many images already attached:', attachedImages.value.length)
       return
     }
     
+    console.log('Adding image to attachedImages array...')
     attachedImages.value.push({
       id: imageId,
       name: file.name,
@@ -1287,16 +1302,34 @@ async function processImageFile(file: File) {
       dataUrl: dataUrl
     })
     
+    console.log('Image added successfully. New count:', attachedImages.value.length)
+    console.log('attachedImages array:', attachedImages.value)
+    
+    // Log compression results if compression was successful
+    if (processedFile !== file) {
+      const originalSize = (file.size / 1024).toFixed(1)
+      const compressedSize = (processedFile.size / 1024).toFixed(1)
+      const compressionRatio = ((1 - processedFile.size / file.size) * 100).toFixed(1)
+      console.log(`Image compressed: ${originalSize}KB → ${compressedSize}KB (${compressionRatio}% reduction)`)
+    }
+    
     // Show success feedback
     console.log(`Image "${file.name}" added successfully`)
     console.log('Current attached images count:', attachedImages.value.length)
     console.log('Image preview container should be visible:', attachedImages.value.length > 0)
+    
+    // Force a reactive update
+    nextTick(() => {
+      console.log('After nextTick - attachedImages count:', attachedImages.value.length)
+      console.log('Image preview container visibility check:', attachedImages.value.length > 0)
+    })
   } catch (err) {
     error.value = `Failed to process image "${file.name}"`
     console.error('Image processing error:', err)
   } finally {
     // Always clear loading state
     imageProcessingLoading.value = false
+    console.log('Image processing completed, loading state cleared')
   }
 }
 
@@ -1504,7 +1537,7 @@ function formatTime(timestamp: number): string {
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(0, 0, 0, 0.1);
   z-index: 100;
-  padding: 0rem;
+  padding: 1rem 0;
 }
 
 .dark .fixed-input-area {
@@ -1515,11 +1548,60 @@ function formatTime(timestamp: number): string {
 .input-area-content {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 0 1rem;
 }
 
 /* Ensure image previews are properly positioned */
 .image-preview-container {
   position: relative;
   z-index: 1;
+}
+
+/* Chat messages container styling */
+.chat-messages-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.chat-messages-wrapper {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Ensure proper spacing and prevent cutoff */
+.chat-messages-container {
+  padding-bottom: 2rem !important; /* Ensure enough space for fixed input */
+}
+
+/* Fix textarea width issues */
+.input-area-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Ensure textarea spans full width */
+.input-area-content .relative,
+.input-area-content .w-full {
+  width: 100% !important;
+}
+
+/* Responsive width adjustments */
+@media (max-width: 1280px) {
+  .input-area-content,
+  .chat-messages-container {
+    max-width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .input-area-content,
+  .chat-messages-container {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
 }
 </style>
