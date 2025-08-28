@@ -690,11 +690,11 @@ watch([attachedImages, error], () => {
 const hasAttachedImages = computed(() => attachedImages.value.length > 0)
 const inputAreaHeight = computed(() => {
   // Base height for input area
-  let height = 80 // Base height in pixels
+  let height = 120 // Base height in pixels (increased from 80)
   
   // Add height for image previews if present
   if (hasAttachedImages.value) {
-    height += 100 // Additional height for image previews
+    height += 140 // Additional height for image previews (increased from 100)
   }
   
   // Add height for error message if present
@@ -706,7 +706,7 @@ const inputAreaHeight = computed(() => {
 })
 
 const chatContainerStyle = computed(() => ({
-  paddingBottom: `${inputAreaHeight.value}px`
+  paddingBottom: `${inputAreaHeight.value + 80}px` // Add extra padding to prevent content cutoff
 }))
 
 // Initialize
@@ -1571,7 +1571,7 @@ function formatTime(timestamp: number): string {
 
 /* Ensure proper spacing and prevent cutoff */
 .chat-messages-container {
-  padding-bottom: 2rem !important; /* Ensure enough space for fixed input */
+  /* padding-bottom is handled by chatContainerStyle computed property */
 }
 
 /* Fix textarea width issues */
