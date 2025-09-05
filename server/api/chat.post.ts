@@ -58,7 +58,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Validate model name format
-  if (!/^[a-zA-Z0-9\-_\.]+$/.test(model.trim())) {
+  if (!/^[a-zA-Z0-9\-_\.\/]+$/.test(model.trim())) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Invalid model name format'
