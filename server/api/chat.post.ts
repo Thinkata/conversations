@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Validate prompt length
-  if (sanitizedPrompt.length > 10000) {
+  if (sanitizedPrompt.length > 1000000) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Prompt too long (max 10,000 characters)'
