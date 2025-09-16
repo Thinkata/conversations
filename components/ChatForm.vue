@@ -162,6 +162,14 @@
                         📋
                       </button>
                       <span v-else class="copy-message-button copied">✅</span>
+                      <button 
+                        type="button"
+                        title="Print response"
+                        @click="printMessage(message.id)"
+                        class="print-message-button"
+                      >
+                        🖨️
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -906,6 +914,222 @@ async function copyAssistantMessage(messageId: string) {
   }
 }
 
+async function printMessage(messageId: string) {
+  const chat = selectedChat.value
+  if (!chat) return
+  const msg = chat.messages?.find(m => m.id === messageId && m.role === 'assistant')
+  if (!msg) return
+  
+  // Import marked for markdown rendering
+  const { marked } = await import('marked')
+  
+  // Render markdown content to HTML first
+  let renderedContent
+  try {
+    renderedContent = marked(msg.content)
+  } catch (e) {
+    console.error('Markdown rendering error:', e)
+    renderedContent = msg.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+  
+  // Extract first line from rendered HTML content for title
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = renderedContent
+  const firstTextNode = tempDiv.textContent || tempDiv.innerText || ''
+  const firstLine = firstTextNode.split('\n')[0].trim()
+  const title = firstLine || 'AI Response'
+  
+  // Create a new window for printing with specific features to minimize browser UI
+  const printWindow = window.open('',  'width=800,height=600,scrollbars=yes,resizable=yes')
+  if (!printWindow) return
+  
+  // Create a clean HTML document for printing
+  const printContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>${title}</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          line-height: 1.6;
+          max-width: 800px;
+          margin: 0 auto;
+          padding: 20px;
+          color: #333;
+          background: white;
+        }
+        
+        .print-header {
+          color: #2563eb;
+          border-bottom: 2px solid #e5e7eb;
+          padding-bottom: 10px;
+          margin-bottom: 20px;
+          font-size: 24px;
+          font-weight: bold;
+        }
+        
+        .print-meta {
+          margin-bottom: 20px;
+          font-size: 14px;
+          color: #666;
+        }
+        
+        .print-content {
+          font-size: 12pt;
+          line-height: 1.6;
+        }
+        
+        .print-content h1 {
+          color: #2563eb;
+          font-size: 20px;
+          margin: 24px 0 12px 0;
+          border-bottom: 1px solid #e5e7eb;
+          padding-bottom: 8px;
+        }
+        
+        .print-content h2 {
+          color: #1f2937;
+          font-size: 18px;
+          margin: 20px 0 10px 0;
+        }
+        
+        .print-content h3 {
+          color: #374151;
+          font-size: 16px;
+          margin: 16px 0 8px 0;
+        }
+        
+        .print-content pre {
+          background-color: #f3f4f6;
+          padding: 15px;
+          border-radius: 8px;
+          border-left: 4px solid #2563eb;
+          margin: 16px 0;
+          overflow-x: auto;
+          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+          font-size: 11pt;
+        }
+        
+        .print-content code {
+          background-color: #f3f4f6;
+          padding: 2px 4px;
+          border-radius: 4px;
+          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+          font-size: 11pt;
+        }
+        
+        .print-content pre code {
+          background: none;
+          padding: 0;
+          border-radius: 0;
+        }
+        
+        .print-content blockquote {
+          border-left: 4px solid #d1d5db;
+          margin: 16px 0;
+          padding-left: 20px;
+          color: #6b7280;
+          font-style: italic;
+        }
+        
+        .print-content ul, .print-content ol {
+          padding-left: 20px;
+          margin: 12px 0;
+        }
+        
+        .print-content li {
+          margin: 4px 0;
+        }
+        
+        .print-content table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 16px 0;
+        }
+        
+        .print-content th, .print-content td {
+          border: 1px solid #d1d5db;
+          padding: 8px 12px;
+          text-align: left;
+        }
+        
+        .print-content th {
+          background-color: #f9fafb;
+          font-weight: 600;
+        }
+        
+        .print-content p {
+          margin: 12px 0;
+        }
+        
+        .print-content strong {
+          font-weight: 600;
+        }
+        
+        .print-content em {
+          font-style: italic;
+        }
+        
+        .print-content a {
+          color: #2563eb;
+          text-decoration: underline;
+        }
+        
+        .print-content hr {
+          border: none;
+          border-top: 1px solid #e5e7eb;
+          margin: 24px 0;
+        }
+        
+        @media print {
+          body { 
+            margin: 0; 
+            padding: 15px; 
+            -webkit-print-color-adjust: exact;
+            color-adjust: exact;
+          }
+          
+          @page {
+            margin: 0.5in;
+            size: A4;
+          }
+          
+          .print-header { page-break-after: avoid; }
+          .print-content pre, .print-content blockquote { page-break-inside: avoid; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="print-content">${renderedContent}</div>
+    </body>
+    </html>
+  `
+  
+  printWindow.document.write(printContent)
+  printWindow.document.close()
+  
+  // Wait for content to load, then print
+  printWindow.onload = () => {
+    setTimeout(() => {
+      printWindow.focus()
+      printWindow.print()
+      // Close the window after printing
+      printWindow.onafterprint = () => {
+        printWindow.close()
+      }
+    }, 100)
+  }
+}
+
 function deleteMessage(messageId: string) {
   const chat = selectedChat.value
   if (!chat) return
@@ -1472,6 +1696,26 @@ function formatTime(timestamp: number): string {
 .delete-message-button:hover {
   color: #ef4444;
   background-color: #fef2f2;
+}
+
+/* Print message button styling */
+.print-message-button {
+  padding: 0.25rem;
+  color: #9ca3af;
+  transition: all 0.15s ease-in-out;
+  border-radius: 0.25rem;
+  font-size: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.print-message-button:hover {
+  color: #2563eb;
+  background-color: #eff6ff;
 }
 
 /* Image preview styling */

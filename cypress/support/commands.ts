@@ -43,6 +43,16 @@ declare global {
        * Custom command to import chats
        */
       importChats(filePath: string): Chainable<void>
+      
+      /**
+       * Custom command to test print functionality
+       */
+      testPrintFunction(message: string): Chainable<void>
+      
+      /**
+       * Custom command to mock print window
+       */
+      mockPrintWindow(): Chainable<{ printContent: string }>
     }
   }
 }
@@ -74,8 +84,10 @@ Cypress.Commands.add('sendMessage', (message: string) => {
 // Wait for AI response
 Cypress.Commands.add('waitForAIResponse', () => {
   // Since we're using intercepted API calls, we don't need to wait for loading indicator
-  // Just wait for the mocked response to appear
-  cy.get('[data-testid="message-list"]').should('contain', 'This is a test response from the AI assistant.')
+  // Wait for any message to appear in the message list (the API now echoes back the user's message)
+  cy.get('[data-testid="message-list"]').should('not.be.empty')
+  // Wait a bit more to ensure the message is fully rendered
+  cy.wait(200)
 })
 
 // Upload image
@@ -107,4 +119,37 @@ Cypress.Commands.add('exportChats', () => {
 Cypress.Commands.add('importChats', (filePath: string) => {
   cy.get('[data-testid="import-button"]').click()
   cy.get('[data-testid="import-file-input"]').attachFile(filePath)
+})
+
+// Test print functionality
+Cypress.Commands.add('testPrintFunction', (message: string) => {
+  cy.createNewChat()
+  cy.sendMessage(message)
+  cy.waitForAIResponse()
+  
+  // Verify print button exists
+  cy.get('.print-message-button').should('be.visible')
+  cy.get('.print-message-button').should('contain', '🖨️')
+})
+
+// Mock print window for testing
+Cypress.Commands.add('mockPrintWindow', () => {
+  let printContent = ''
+  
+  cy.window().then((win) => {
+    cy.stub(win, 'open').returns({
+      document: {
+        write: cy.stub().callsFake((content) => {
+          printContent = content
+        }),
+        close: cy.stub()
+      },
+      focus: cy.stub(),
+      print: cy.stub(),
+      onload: null,
+      onafterprint: null
+    })
+  })
+  
+  return cy.wrap({ printContent })
 })
