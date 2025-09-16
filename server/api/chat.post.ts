@@ -13,9 +13,36 @@ type RequestBody = {
     content: string
     images?: string[]
   }> | null
+  isContinuation?: boolean
+  previousContent?: string
 }
 
 const MAX_CONTEXT_MESSAGES = 10
+
+// Function to check if content ends with CONTINUE signal
+function hasContinueSignal(content: string): boolean {
+  return content.trim().endsWith('<<CONTINUE>>')
+}
+
+// Function to remove CONTINUE signal from content
+function removeContinueSignal(content: string): string {
+  return content.replace(/<<CONTINUE>>\s*$/, '').trim()
+}
+
+// Compute a single fenced markdown wrapper that won't conflict with internal backticks
+function wrapWithSingleMarkdownFence(content: string): string {
+  // Find the longest run of backticks in the content
+  let maxRun = 3
+  const matches = content.match(/`+/g)
+  if (matches) {
+    for (const m of matches) {
+      if (m.length > maxRun) maxRun = m.length
+    }
+  }
+  const fence = '`'.repeat(maxRun + 1)
+  // Do not strip internal fences; outer longer fence will encapsulate them safely
+  return `${fence}markdown\n${content}\n${fence}`
+}
 
 function parseDataUrl(dataUrl: string) {
   const m = dataUrl.match(/^data:(.+?);base64,(.*)$/)
@@ -29,7 +56,7 @@ function parseDataUrl(dataUrl: string) {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
-  const { prompt, model, images, audios, conversationId, systemPrompt, messages } = body || {}
+  const { prompt, model, images, audios, conversationId, systemPrompt, messages, isContinuation, previousContent } = body || {}
 
   // Enhanced input validation and sanitization
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -85,7 +112,14 @@ export default defineEventHandler(async (event) => {
     const existingId = conversationId && conversationId.trim().length > 0 ? conversationId.trim() : crypto.randomUUID()
 
     // Build user message content - support text + multimodal
-    const content: any[] = [{ type: 'text', text: sanitizedPrompt }]
+    let promptText = sanitizedPrompt
+    
+    // If this is a continuation request, modify the prompt to ask for continuation
+    if (isContinuation && previousContent) {
+      promptText = `Continue from <<CONTINUE>>`
+    }
+    
+    const content: any[] = [{ type: 'text', text: promptText }]
 
     if (images && images.length > 0) {
       for (const imageData of images) {
@@ -105,6 +139,13 @@ export default defineEventHandler(async (event) => {
 
     // Prepare context window using frontend's message history
     const historyForContext: { role: 'system' | 'user' | 'assistant'; content: any }[] = []
+
+    // Add truncation instruction system prompt
+    const truncationInstruction = {
+      role: 'system' as const,
+      content: [{ type: 'text', text: 'If your response must be truncated due to length, at the very end of the content you are able to send, output exactly `<<CONTINUE>>`. When I later send `Continue from <<CONTINUE>>`, resume from where you left off without repeating prior content.' }]
+    }
+    historyForContext.push(truncationInstruction)
 
     // Add per-chat system prompt if provided
     if (systemPrompt && systemPrompt.trim().length > 0) {
@@ -145,32 +186,98 @@ export default defineEventHandler(async (event) => {
     // Append current user message
     historyForContext.push({ role: 'user', content })
 
-    // Call AI API
-    const chatResponse = await client.chat.completions.create({
-      model: model.trim(),
-      messages: historyForContext,
-      //max_tokens: 2048,
-      //temperature: 0.7
-    })
+    // Set up streaming response
+    setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
+    setHeader(event, 'Cache-Control', 'no-cache')
+    setHeader(event, 'Connection', 'keep-alive')
 
-    // Basic token usage logging (SDK returns usage for many providers)
-    const usage = (chatResponse as any)?.usage
-    const promptTokens = usage?.prompt_tokens ?? usage?.input_tokens
-    const completionTokens = usage?.completion_tokens ?? usage?.output_tokens
+    // Implement loop-based truncation management
+    let fullContent = ''
+    let needsContinuation = false
+    let continueLoop = true
+    let currentMessages = [...historyForContext]
+    let finishReason: string | null = null
 
-    // Extract response content
-    const responseContent = chatResponse.choices?.[0]?.message?.content || ''
-    
-    if (!responseContent) {
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'No response content received from AI model'
+    while (continueLoop) {
+      // Call AI API with streaming
+      const stream = await client.chat.completions.create({
+        model: model.trim(),
+        messages: currentMessages,
+        stream: true,
+        max_tokens: 2048
       })
+
+      let chunkedContent = ''
+      let currentFinishReason: string | null = null
+
+      // Stream the response
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || ''
+        if (content) {
+          chunkedContent += content
+          fullContent += content
+          
+          // Send chunk to client
+          event.node.res.write(`data: ${JSON.stringify({
+            type: 'content',
+            content: content
+          })}\n\n`)
+        }
+        
+        // Check finish reason
+        if (chunk.choices[0]?.finish_reason) {
+          currentFinishReason = chunk.choices[0].finish_reason
+          finishReason = currentFinishReason
+        }
+      }
+
+      // Check if we need to continue
+      if (currentFinishReason === 'length' || hasContinueSignal(chunkedContent)) {
+        // Remove CONTINUE signal if present
+        if (hasContinueSignal(chunkedContent)) {
+          chunkedContent = removeContinueSignal(chunkedContent)
+          fullContent = fullContent.replace(/<<CONTINUE>>\s*$/, '').trim()
+        }
+        
+        // Add the assistant's response to message history
+        currentMessages.push({ 
+          role: 'assistant', 
+          content: chunkedContent 
+        })
+        
+        // Add continuation request
+        currentMessages.push({
+          role: 'user',
+          content: 'Continue from <<CONTINUE>>'
+        })
+        
+        // Continue the loop
+        needsContinuation = true
+        console.log('Continuing due to truncation, finish_reason:', currentFinishReason)
+      } else {
+        // No truncation, finished normally
+        continueLoop = false
+        needsContinuation = false
+        console.log('Finished normally, finish_reason:', currentFinishReason)
+      }
     }
 
-    // No need to persist conversation on backend - frontend handles storage
+    // Prepare normalized final content wrapped in a single markdown fence
+    const finalContent = wrapWithSingleMarkdownFence(fullContent)
 
-    return { success: true, content: responseContent, model: model, usage: chatResponse.usage, conversationId: existingId }
+    // Send final message with continuation status and normalized content
+    event.node.res.write(`data: ${JSON.stringify({
+      type: 'complete',
+      needsContinuation: isContinuation ? false : needsContinuation,
+      isContinuation: isContinuation || false,
+      conversationId: existingId,
+      model: model.trim(),
+      finishReason: finishReason,
+      finalContent: finalContent
+    })}\n\n`)
+
+    // End the stream
+    event.node.res.end()
 
   } catch (error: any) {
     // Sanitize error logging to prevent sensitive information exposure

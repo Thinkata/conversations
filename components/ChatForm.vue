@@ -131,7 +131,18 @@
                 ]"
               >
                 <div class="w-full overflow-hidden chat-message-container min-w-0">
+                  <div v-if="message.isContinuation" class="continuation-indicator mb-2">
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                      ↳ Continuation
+                    </span>
+                  </div>
                   <MarkdownRenderer :content="message.content" />
+                  <div v-if="message.isStreaming" class="streaming-indicator mt-2">
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
+                      Streaming...
+                    </span>
+                  </div>
                 </div>
                 <div 
                   :class="[
@@ -169,6 +180,17 @@
                         class="print-message-button"
                       >
                         🖨️
+                      </button>
+                      <!-- Continuation button only shown for manual continuation requests -->
+                      <button 
+                        v-if="message.needsContinuation && !message.isStreaming && message.isContinuation"
+                        type="button"
+                        title="Continue response"
+                        @click="requestContinuation(message.id)"
+                        class="continue-message-button"
+                        :disabled="loading"
+                      >
+                        {{ loading ? '⏳' : '↗️' }}
                       </button>
                     </div>
                   </div>
@@ -585,6 +607,9 @@ interface ChatMessage {
   content: string
   timestamp: number
   images?: string[]
+  needsContinuation?: boolean
+  isContinuation?: boolean
+  isStreaming?: boolean
 }
 
 interface Chat {
@@ -634,7 +659,16 @@ watch(modelOptions, (newModels) => {
 
 // Computed property for safe access to models
 const safeModelOptions = computed(() => {
-  return modelOptions.value && Array.isArray(modelOptions.value) ? modelOptions.value : []
+  if (!modelOptions.value || !Array.isArray(modelOptions.value)) {
+    return []
+  }
+  
+  // Sort models alphabetically by display name for better UX
+  return [...modelOptions.value].sort((a, b) => {
+    const nameA = getModelDisplayName(a.id)
+    const nameB = getModelDisplayName(b.id)
+    return nameA.localeCompare(nameB)
+  })
 })
 const searchQuery = ref<string>('')
 const prompt = ref<string>('')
@@ -1201,9 +1235,28 @@ async function sendMessage() {
       messageCount: selectedChat.value.messages.length
     })
     
-    const response = await $fetch('/api/chat', {
+    // Create streaming assistant message
+    const assistantMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true
+    }
+
+    if (selectedChat.value) {
+      selectedChat.value.messages.push(assistantMessage)
+      selectedChat.value.updatedAt = Date.now()
+      selectedChat.value.messageCount = selectedChat.value.messages.length
+    }
+
+    // Make streaming request
+    const response = await fetch('/api/chat', {
       method: 'POST',
-      body: {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         prompt: currentPrompt,
         model: selectedChat.value.model,
         images: currentImages.map(img => img.dataUrl),
@@ -1214,40 +1267,68 @@ async function sendMessage() {
           content: msg.content,
           images: msg.images || []
         }))
-      }
+      })
     })
-    
-    console.log('[ChatForm] API response received:', response)
 
-    // Check if response indicates success
-    if (response && response.success && response.content) {
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: response.content,
-        timestamp: Date.now()
-      }
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
 
-      if (selectedChat.value) {
-        selectedChat.value.messages.push(assistantMessage)
-        selectedChat.value.updatedAt = Date.now()
-        selectedChat.value.messageCount = selectedChat.value.messages.length
-        
-        // Update the chat name based on the first exchange if it's still the default
-        if (selectedChat.value.messages.length === 2 && selectedChat.value.name.startsWith('New Chat')) {
-          // Generate a meaningful name from the first user message
-          const firstUserMessage = selectedChat.value.messages[0].content
-          const truncatedName = firstUserMessage.length > 50 
-            ? firstUserMessage.substring(0, 50) + '...' 
-            : firstUserMessage
-          selectedChat.value.name = sanitizeContent(truncatedName) // Sanitize chat name
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('No response body reader available')
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            
+            if (data.type === 'content') {
+              // Update the streaming message content
+              if (selectedChat.value && assistantMessage) {
+                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
+                if (messageIndex !== -1) {
+                  selectedChat.value.messages[messageIndex].content += data.content
+                }
+              }
+            } else if (data.type === 'complete') {
+              // Mark streaming as complete and set continuation status
+              if (selectedChat.value && assistantMessage) {
+                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
+                if (messageIndex !== -1) {
+                  selectedChat.value.messages[messageIndex].isStreaming = false
+                  // For initial requests, the API handles continuation automatically, so no manual continuation needed
+                  selectedChat.value.messages[messageIndex].needsContinuation = false
+                  selectedChat.value.messages[messageIndex].isContinuation = data.isContinuation || false
+                }
+              }
+              
+              // Update the chat name based on the first exchange if it's still the default
+              if (selectedChat.value && selectedChat.value.messages.length === 2 && selectedChat.value.name.startsWith('New Chat')) {
+                const firstUserMessage = selectedChat.value.messages[0].content
+                const truncatedName = firstUserMessage.length > 50 
+                  ? firstUserMessage.substring(0, 50) + '...' 
+                  : firstUserMessage
+                selectedChat.value.name = sanitizeContent(truncatedName)
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing streaming data:', e)
+          }
         }
       }
-    } else if (response && response.error) {
-      // Handle API error response
-      throw new Error(response.error || 'API request failed')
-    } else {
-      throw new Error('No content received from AI model')
     }
   } catch (e: any) {
     console.error('Send message error:', e)
@@ -1272,6 +1353,128 @@ async function sendMessage() {
   } finally {
     // Always ensure loading is false, even if there's an error
     console.log('[ChatForm] Setting loading to false in finally block')
+    loading.value = false
+  }
+}
+
+// Function to request continuation of a message
+async function requestContinuation(messageId: string) {
+  if (!selectedChat.value) return
+
+  const message = selectedChat.value.messages.find(m => m.id === messageId && m.role === 'assistant')
+  if (!message || !message.needsContinuation) return
+
+  console.log('[ChatForm] Requesting continuation for message:', messageId)
+  loading.value = true
+  error.value = ''
+
+  try {
+    // Create streaming continuation message
+    const continuationMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+      isContinuation: true
+    }
+
+    if (selectedChat.value) {
+      selectedChat.value.messages.push(continuationMessage)
+      selectedChat.value.updatedAt = Date.now()
+      selectedChat.value.messageCount = selectedChat.value.messages.length
+    }
+
+    // Make streaming continuation request
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt: 'Continue from <<CONTINUE>>',
+        model: selectedChat.value.model,
+        conversationId: selectedChat.value.id,
+        systemPrompt: selectedChat.value.systemPrompt || '',
+        messages: selectedChat.value.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          images: msg.images || []
+        })),
+        isContinuation: true,
+        previousContent: message.content
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('No response body reader available')
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            
+            if (data.type === 'content') {
+              // Update the streaming continuation message content
+              if (selectedChat.value && continuationMessage) {
+                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === continuationMessage.id)
+                if (messageIndex !== -1) {
+                  selectedChat.value.messages[messageIndex].content += data.content
+                }
+              }
+            } else if (data.type === 'complete') {
+              // Mark streaming as complete
+              if (selectedChat.value && continuationMessage) {
+                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === continuationMessage.id)
+                if (messageIndex !== -1) {
+                  selectedChat.value.messages[messageIndex].isStreaming = false
+                  selectedChat.value.messages[messageIndex].needsContinuation = data.needsContinuation || false
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing streaming continuation data:', e)
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error('Continuation request error:', e)
+    if (e.status === 500) {
+      error.value = 'Internal server error'
+    } else if (e.status === 400) {
+      error.value = 'Bad request'
+    } else if (e.status === 401) {
+      error.value = 'Unauthorized'
+    } else if (e.status === 403) {
+      error.value = 'Forbidden'
+    } else if (e.status === 429) {
+      error.value = 'Rate limit exceeded'
+    } else if (e.status === 503) {
+      error.value = 'Service unavailable'
+    } else if (e.message) {
+      error.value = e.message
+    } else {
+      error.value = 'Continuation request failed'
+    }
+  } finally {
     loading.value = false
   }
 }
@@ -1716,6 +1919,31 @@ function formatTime(timestamp: number): string {
 .print-message-button:hover {
   color: #2563eb;
   background-color: #eff6ff;
+}
+
+/* Continue message button styling */
+.continue-message-button {
+  padding: 0.25rem;
+  color: #9ca3af;
+  transition: all 0.15s ease-in-out;
+  border-radius: 0.25rem;
+  font-size: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.continue-message-button:hover:not(:disabled) {
+  color: #10b981;
+  background-color: #ecfdf5;
+}
+
+.continue-message-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Image preview styling */
