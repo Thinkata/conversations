@@ -55,6 +55,14 @@
               </div>
               <div class="flex items-center space-x-1 ml-2" @click.stop>
                 <UButton
+                  @click="startChatWithWorkflow(workflow.id)"
+                  color="green"
+                  variant="ghost"
+                  icon="i-heroicons-chat-bubble-left-right"
+                  size="xs"
+                  title="Start chat with this workflow"
+                />
+                <UButton
                   @click="editWorkflow(workflow.id)"
                   color="gray"
                   variant="ghost"
@@ -202,7 +210,13 @@
                         variant="soft"
                         size="xs"
                       />
-                      <span class="text-xs text-gray-500 dark:text-gray-400">{{ step.project.model }}</span>
+                      <USelect
+                        v-model="step.model"
+                        :options="modelOptions"
+                        placeholder="Select model"
+                        size="xs"
+                        class="w-32"
+                      />
                     </div>
                   </div>
                 </div>
@@ -348,6 +362,8 @@ const {
   initialize
 } = useProjects()
 
+const { models } = useModels()
+
 // Local state for workflow selection (not managed by composable)
 const selectedWorkflowId = ref<string | null>(null)
 const clickCounter = ref(0)
@@ -361,7 +377,7 @@ const searchQuery = ref('')
 const isDragging = ref(false)
 const isDragOver = ref(false)
 const draggedProject = ref<Project | null>(null)
-const workflowSteps = ref<Array<{ id: string; project: Project; order: number }>>([])
+const workflowSteps = ref<Array<{ id: string; project: Project; order: number; model: string }>>([])
 const editingWorkflowId = ref<string | null>(null)
 const editingWorkflowName = ref('')
 const editingWorkflowDescription = ref('')
@@ -381,6 +397,13 @@ const filteredProjects = computed(() => {
     project.tags.some(tag => tag.toLowerCase().includes(query))
   )
 })
+
+const modelOptions = computed(() => 
+  models.value.map(model => ({
+    label: model.name,
+    value: model.id
+  }))
+)
 
 // Watch for prefill data
 watch(() => props.prefillData, (newData) => {
@@ -447,7 +470,8 @@ const loadWorkflowSteps = () => {
     return {
       id: step.id,
       project: project || { name: 'Unknown Project', description: '', metadata: { category: 'general' }, model: 'unknown' } as Project,
-      order: step.order
+      order: step.order,
+      model: step.model || project?.model || 'gpt-4'
     }
   })
 }
@@ -521,6 +545,7 @@ const saveWorkflow = async () => {
         id: step.id,
         projectId: step.project.id,
         order: step.order,
+        model: step.model,
         inputMapping: step.order > 0 ? {
           fromStepId: workflowSteps.value[step.order - 1].id,
           outputKey: 'content',
@@ -585,7 +610,8 @@ const addProjectToWorkflow = (project: Project) => {
   const newStep = {
     id: crypto.randomUUID(),
     project: { ...project }, // Retain all project attributes
-    order: workflowSteps.value.length
+    order: workflowSteps.value.length,
+    model: project.model // Use project's default model initially
   }
   
   workflowSteps.value.push(newStep)
@@ -627,6 +653,10 @@ const moveStepDown = (index: number) => {
   }
 }
 
+const startChatWithWorkflow = (workflowId: string) => {
+  emit('start-chat', workflowId)
+}
+
 const getCategoryColor = (category: string) => {
   const colors = {
     general: 'gray',
@@ -642,6 +672,7 @@ const getCategoryColor = (category: string) => {
 // Emits
 const emit = defineEmits<{
   select: [workflowId: string]
+  'start-chat': [workflowId: string]
   close: []
 }>()
 

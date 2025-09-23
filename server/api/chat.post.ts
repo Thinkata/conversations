@@ -56,7 +56,7 @@ function parseDataUrl(dataUrl: string) {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
-  const { prompt, model, images, audios, conversationId, systemPrompt, messages, isContinuation, previousContent } = body || {}
+  const { prompt, model, images, audios, conversationId, systemPrompt, messages, isContinuation, previousContent, workflowId, workflowData } = body || {}
 
   // Enhanced input validation and sanitization
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -90,6 +90,11 @@ export default defineEventHandler(async (event) => {
       statusCode: 400,
       statusMessage: 'Invalid model name format'
     })
+  }
+
+  // Handle workflow execution if workflowId is provided
+  if (workflowId) {
+    return await handleWorkflowExecution(workflowId, prompt, workflowData, event)
   }
 
   // Get configuration
@@ -311,4 +316,150 @@ export default defineEventHandler(async (event) => {
     }
   }
 })
+
+// Handle workflow execution
+async function handleWorkflowExecution(workflowId: string, prompt: string, workflowData: any, event: any) {
+  console.log('[API] Starting workflow execution:', { workflowId, prompt: prompt.substring(0, 100), workflowData })
+  
+  try {
+    // Get runtime config
+    const runtimeConfig = useRuntimeConfig()
+    const apiKey = runtimeConfig.API_KEY
+    const baseURL = runtimeConfig.BASE_URL
+
+    if (!apiKey) {
+      throw new Error('API key not configured')
+    }
+
+    // Initialize OpenAI client
+    const client = new OpenAI({ apiKey, baseURL })
+
+    if (!workflowData || !workflowData.workflow || !workflowData.projects) {
+      console.error('[API] Workflow data validation failed:', { workflowData })
+      throw new Error('Workflow data not provided')
+    }
+
+    const { workflow, projects } = workflowData
+    console.log('[API] Workflow data validated:', { 
+      workflowName: workflow.name, 
+      stepCount: workflow.steps.length, 
+      projectCount: projects.length 
+    })
+
+    // Execute workflow steps in sequence
+    let currentInput = prompt
+    let stepResults = []
+
+    for (let i = 0; i < workflow.steps.length; i++) {
+      const step = workflow.steps[i]
+      const project = projects.find(p => p.id === step.projectId)
+      
+      console.log(`[API] Executing step ${i + 1}/${workflow.steps.length}:`, {
+        stepId: step.id,
+        projectId: step.projectId,
+        projectName: project?.name || 'Unknown',
+        model: step.model || project?.model
+      })
+      
+      if (!project) {
+        throw new Error(`Project not found: ${step.projectId}`)
+      }
+
+      // Execute project with current input
+      const result = await executeProjectStep(client, project, currentInput, step.model)
+      console.log(`[API] Step ${i + 1} completed. Output length:`, result.length)
+      
+      stepResults.push({
+        stepIndex: i,
+        projectId: step.projectId,
+        projectName: project.name,
+        input: currentInput,
+        output: result,
+        model: step.model || project.model
+      })
+
+      // Use this step's output as input for next step
+      currentInput = result
+    }
+
+    console.log('[API] Workflow execution completed. Final result length:', currentInput.length)
+
+    // Return final result
+    const finalResult = {
+      content: currentInput,
+      conversationId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      timestamp: Date.now(),
+      workflowExecution: {
+        workflowId,
+        workflowName: workflow.name,
+        steps: stepResults
+      }
+    }
+
+    console.log('[API] Returning workflow result:', {
+      contentLength: finalResult.content.length,
+      stepCount: finalResult.workflowExecution.steps.length
+    })
+
+    return new Response(JSON.stringify(finalResult), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+
+  } catch (error) {
+    console.error('[API] Workflow execution error:', error)
+    return new Response(JSON.stringify({
+      content: `Workflow execution failed: ${error.message}`,
+      conversationId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      timestamp: Date.now()
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+  }
+}
+
+// Execute a single project step
+async function executeProjectStep(client: OpenAI, project: any, input: string, modelOverride?: string) {
+  const model = modelOverride || project.model
+  
+  console.log(`[API] Executing project step:`, {
+    projectName: project.name,
+    model,
+    inputLength: input.length,
+    instructionsLength: project.instructions?.length || 0
+  })
+  
+  const response = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: project.instructions
+      },
+      {
+        role: 'user',
+        content: input
+      }
+    ],
+    max_tokens: 4000,
+    temperature: 0.7
+  })
+
+  const result = response.choices[0]?.message?.content || ''
+  console.log(`[API] Project step completed:`, {
+    projectName: project.name,
+    outputLength: result.length,
+    finishReason: response.choices[0]?.finish_reason
+  })
+
+  return result
+}
+
 

@@ -71,6 +71,13 @@
                     variant="soft"
                     size="xs"
                   />
+                  <UBadge 
+                    v-if="chat.workflowId"
+                    label="Workflow"
+                    color="orange"
+                    variant="soft"
+                    size="xs"
+                  />
                 </div>
               </div>
               <UButton 
@@ -288,7 +295,8 @@
                   icon="i-heroicons-cog-6-tooth"
                   size="sm"
                   title="System Prompt"
-                  class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"
+                  :disabled="!!selectedChat?.workflowId"
+                  class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <UButton
                   @click="openModelModal"
@@ -297,7 +305,8 @@
                   icon="i-heroicons-cpu-chip"
                   size="sm"
                   title="AI Model"
-                  class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"
+                  :disabled="!!selectedChat?.workflowId"
+                  class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <UButton
                   @click="openSearchModal"
@@ -309,6 +318,16 @@
                   class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"
                 />
                 <UButton
+                  @click="openWorkflowModal"
+                  color="gray"
+                  variant="ghost"
+                  icon="i-heroicons-arrow-path"
+                  size="sm"
+                  title="Workflow"
+                  :disabled="!selectedChat"
+                  class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <UButton
                   @click="() => fileInput?.click()"
                   color="gray"
                   variant="ghost"
@@ -318,9 +337,14 @@
                   class="hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"
                 />
                 <div class="flex-1"></div>
-                <span class="text-xs text-gray-500 dark:text-gray-400">
-                  {{ getModelDisplayName(selectedChat?.model || selectedModel) }}
-                </span>
+                <div class="flex items-center space-x-2">
+                  <span v-if="selectedChat?.workflowId" class="text-xs text-orange-600 dark:text-orange-400" title="Using workflow">
+                    🔄
+                  </span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ getModelDisplayName(selectedChat?.model || selectedModel) }}
+                  </span>
+                </div>
               </div>
 
               <!-- Message Input -->
@@ -599,6 +623,73 @@
         </div>
       </template>
     </UModal>
+
+    <!-- Workflow Selection Modal -->
+    <UModal 
+      v-model:open="showWorkflowModal"
+      title="Select Workflow"
+      description="Choose a workflow to apply to this chat. The workflow will use its configured projects with their individual system prompts and models."
+    >
+      <template #body>
+        <div class="space-y-4">
+          <!-- No workflows message -->
+          <div v-if="workflows.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400">
+            <div class="mb-4">
+              <UIcon name="i-heroicons-arrow-path" class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600" />
+            </div>
+            <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No Workflows Available</h4>
+            <p class="text-sm mb-4">Create workflows in the Workflows tab first, then return here to select them for your chat.</p>
+            <UButton 
+              @click="() => { showWorkflowModal = false; /* Navigate to workflows tab */ }"
+              color="primary"
+              variant="outline"
+              size="sm"
+            >
+              Go to Workflows Tab
+            </UButton>
+          </div>
+          
+          <div class="max-h-64 overflow-y-auto space-y-2">
+            <UCard 
+              v-for="workflow in workflows" 
+              :key="workflow.id"
+              @click="selectWorkflow(workflow.id); showWorkflowModal = false"
+              class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              variant="outline"
+            >
+              <div class="font-medium">{{ workflow.name }}</div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">{{ workflow.description }}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                {{ workflow.steps.length }} steps
+              </div>
+            </UCard>
+          </div>
+          
+          <!-- Clear Workflow Option -->
+          <UCard 
+            @click="clearWorkflow(); showWorkflowModal = false"
+            class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-dashed"
+            variant="outline"
+          >
+            <div class="font-medium text-gray-500 dark:text-gray-400">Clear Workflow</div>
+            <div class="text-sm text-gray-400 dark:text-gray-500">Remove workflow and use standard chat</div>
+          </UCard>
+        </div>
+      </template>
+      
+      <template #footer>
+        <div class="flex justify-end">
+          <UButton 
+            @click="showWorkflowModal = false"
+            color="primary"
+            variant="solid"
+          >
+            Close
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
   </div>
 </template>
 
@@ -634,6 +725,65 @@ const { defaultModel, defaultSystemPrompt } = useDefaultModel()
 
 // Get dynamic models from API
 const { models: modelOptions, loading: modelsLoading, error: modelsError, fetchModels } = useModels()
+
+// Get workflows
+const { workflows, projects, initialize } = useProjects()
+
+// Get workflow data for API call
+const getWorkflowData = (workflowId: string) => {
+  console.log('[ChatForm] Getting workflow data for:', workflowId)
+  const workflow = workflows.value.find(w => w.id === workflowId)
+  if (!workflow) {
+    console.error('[ChatForm] Workflow not found:', workflowId)
+    return null
+  }
+  
+  console.log('[ChatForm] Found workflow:', {
+    id: workflow.id,
+    name: workflow.name,
+    stepCount: workflow.steps.length
+  })
+  
+  // Get projects for this workflow
+  const workflowProjects = workflow.steps.map(step => {
+    const project = projects.value.find(p => p.id === step.projectId)
+    if (!project) {
+      console.error('[ChatForm] Project not found for step:', step.projectId)
+      return null
+    }
+    return {
+      id: project.id,
+      name: project.name,
+      instructions: project.instructions,
+      model: step.model || project.model
+    }
+  }).filter(Boolean)
+  
+  console.log('[ChatForm] Workflow projects:', {
+    requested: workflow.steps.length,
+    found: workflowProjects.length,
+    projects: workflowProjects.map(p => ({ id: p.id, name: p.name }))
+  })
+  
+  const result = {
+    workflow: {
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description,
+      steps: workflow.steps
+    },
+    projects: workflowProjects
+  }
+  
+  console.log('[ChatForm] Returning workflow data:', result)
+  return result
+}
+
+// Initialize workflows on mount
+onMounted(async () => {
+  await initialize()
+  console.log('Workflows loaded:', workflows.value)
+})
 
 // Get chat data from parent component
 const chats = inject('chats') as Ref<Chat[]>
@@ -696,6 +846,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const showSystemPromptModal = ref(false)
 const showModelModal = ref(false)
 const showSearchModal = ref(false)
+const showWorkflowModal = ref(false)
 
 // Sidebar state
 const sidebarCollapsed = ref(false)
@@ -718,6 +869,7 @@ const attachedImages = ref<Array<{
 const selectedChat = computed(() => 
   chats.value?.find(chat => chat.id === selectedChatId.value)
 )
+
 
 const filteredChats = computed(() => {
   if (!chats.value) return []
@@ -868,6 +1020,53 @@ function saveModel() {
   showModelModal.value = false
 }
 
+function updateChatConfiguration(chatId: string, updates: Partial<Chat>) {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (chat) {
+    Object.assign(chat, updates)
+    chat.updatedAt = Date.now()
+  }
+}
+
+function selectWorkflow(workflowId: string) {
+  console.log('[ChatForm] Selecting workflow:', workflowId)
+  if (!selectedChat.value) {
+    console.error('[ChatForm] No selected chat when trying to select workflow')
+    return
+  }
+  
+  const workflow = workflows.value.find(w => w.id === workflowId)
+  if (workflow) {
+    console.log('[ChatForm] Found workflow for selection:', {
+      id: workflow.id,
+      name: workflow.name,
+      stepCount: workflow.steps.length
+    })
+    
+    selectedChat.value.workflowId = workflowId
+    selectedChat.value.chatType = 'workflow'
+    selectedChat.value.systemPrompt = `This is a workflow-based chat. The workflow "${workflow.name}" will be executed with the following steps: ${workflow.steps.map((step, index) => `${index + 1}. ${step.projectId}`).join(', ')}`
+    selectedChat.value.updatedAt = Date.now()
+    
+    console.log('[ChatForm] Workflow selected successfully:', {
+      chatId: selectedChat.value.id,
+      workflowId: selectedChat.value.workflowId,
+      chatType: selectedChat.value.chatType
+    })
+  } else {
+    console.error('[ChatForm] Workflow not found for selection:', workflowId)
+  }
+}
+
+function clearWorkflow() {
+  if (!selectedChat.value) return
+  
+  selectedChat.value.workflowId = undefined
+  selectedChat.value.chatType = 'standard'
+  selectedChat.value.systemPrompt = defaultSystemPrompt.value
+  selectedChat.value.updatedAt = Date.now()
+}
+
 // Modal functions
 function openSystemPromptModal() {
   showSystemPromptModal.value = true
@@ -879,6 +1078,11 @@ function openModelModal() {
 
 function openSearchModal() {
   showSearchModal.value = true
+}
+
+function openWorkflowModal() {
+  if (!selectedChat.value) return
+  showWorkflowModal.value = true
 }
 
 // Utility functions
@@ -1261,6 +1465,17 @@ async function sendMessage() {
       selectedChat.value.messageCount = selectedChat.value.messages.length
     }
 
+    // Check if this is a workflow execution
+    const isWorkflowExecution = selectedChat.value.workflowId && getWorkflowData(selectedChat.value.workflowId)
+    
+    console.log('[ChatForm] Sending API request with:', {
+      prompt: currentPrompt,
+      model: selectedChat.value.model,
+      workflowId: selectedChat.value.workflowId,
+      isWorkflowExecution,
+      workflowData: isWorkflowExecution ? getWorkflowData(selectedChat.value.workflowId) : null
+    })
+
     // Make streaming request
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -1273,6 +1488,8 @@ async function sendMessage() {
         images: currentImages.map(img => img.dataUrl),
         conversationId: selectedChat.value.id,
         systemPrompt: selectedChat.value.systemPrompt || '',
+        workflowId: selectedChat.value.workflowId,
+        workflowData: selectedChat.value.workflowId ? getWorkflowData(selectedChat.value.workflowId) : null,
         messages: selectedChat.value.messages.map(msg => ({
           role: msg.role,
           content: msg.content,
@@ -1285,58 +1502,91 @@ async function sendMessage() {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('No response body reader available')
-    }
+    // Handle workflow execution response (JSON) vs regular chat response (streaming)
+    if (isWorkflowExecution) {
+      console.log('[ChatForm] Handling workflow execution response (JSON)')
+      const workflowResult = await response.json()
+      console.log('[ChatForm] Workflow execution result:', workflowResult)
+      
+      if (selectedChat.value && assistantMessage) {
+        const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
+        if (messageIndex !== -1) {
+          selectedChat.value.messages[messageIndex].content = workflowResult.content || 'Workflow execution completed'
+          selectedChat.value.messages[messageIndex].isStreaming = false
+          selectedChat.value.messages[messageIndex].needsContinuation = false
+          selectedChat.value.messages[messageIndex].isContinuation = false
+          
+          // Add workflow execution details if available
+          if (workflowResult.workflowExecution) {
+            selectedChat.value.messages[messageIndex].workflowExecution = workflowResult.workflowExecution
+            console.log('[ChatForm] Added workflow execution details:', workflowResult.workflowExecution)
+          }
+        }
+      }
+      
+      // Update the chat name based on the first exchange if it's still the default
+      if (selectedChat.value && selectedChat.value.messages.length === 2 && selectedChat.value.name.startsWith('New Chat')) {
+        const firstUserMessage = selectedChat.value.messages[0].content
+        const truncatedName = firstUserMessage.length > 50 
+          ? firstUserMessage.substring(0, 50) + '...' 
+          : firstUserMessage
+        selectedChat.value.name = sanitizeContent(truncatedName)
+      }
+    } else {
+      console.log('[ChatForm] Handling regular chat response (streaming)')
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body reader available')
+      }
 
-    const decoder = new TextDecoder()
-    let buffer = ''
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            
-            if (data.type === 'content') {
-              // Update the streaming message content
-              if (selectedChat.value && assistantMessage) {
-                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
-                if (messageIndex !== -1) {
-                  selectedChat.value.messages[messageIndex].content += data.content
-                }
-              }
-            } else if (data.type === 'complete') {
-              // Mark streaming as complete and set continuation status
-              if (selectedChat.value && assistantMessage) {
-                const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
-                if (messageIndex !== -1) {
-                  selectedChat.value.messages[messageIndex].isStreaming = false
-                  // For initial requests, the API handles continuation automatically, so no manual continuation needed
-                  selectedChat.value.messages[messageIndex].needsContinuation = false
-                  selectedChat.value.messages[messageIndex].isContinuation = data.isContinuation || false
-                }
-              }
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
               
-              // Update the chat name based on the first exchange if it's still the default
-              if (selectedChat.value && selectedChat.value.messages.length === 2 && selectedChat.value.name.startsWith('New Chat')) {
-                const firstUserMessage = selectedChat.value.messages[0].content
-                const truncatedName = firstUserMessage.length > 50 
-                  ? firstUserMessage.substring(0, 50) + '...' 
-                  : firstUserMessage
-                selectedChat.value.name = sanitizeContent(truncatedName)
+              if (data.type === 'content') {
+                // Update the streaming message content
+                if (selectedChat.value && assistantMessage) {
+                  const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
+                  if (messageIndex !== -1) {
+                    selectedChat.value.messages[messageIndex].content += data.content
+                  }
+                }
+              } else if (data.type === 'complete') {
+                // Mark streaming as complete and set continuation status
+                if (selectedChat.value && assistantMessage) {
+                  const messageIndex = selectedChat.value.messages.findIndex(m => m.id === assistantMessage.id)
+                  if (messageIndex !== -1) {
+                    selectedChat.value.messages[messageIndex].isStreaming = false
+                    // For initial requests, the API handles continuation automatically, so no manual continuation needed
+                    selectedChat.value.messages[messageIndex].needsContinuation = false
+                    selectedChat.value.messages[messageIndex].isContinuation = data.isContinuation || false
+                  }
+                }
+                
+                // Update the chat name based on the first exchange if it's still the default
+                if (selectedChat.value && selectedChat.value.messages.length === 2 && selectedChat.value.name.startsWith('New Chat')) {
+                  const firstUserMessage = selectedChat.value.messages[0].content
+                  const truncatedName = firstUserMessage.length > 50 
+                    ? firstUserMessage.substring(0, 50) + '...' 
+                    : firstUserMessage
+                  selectedChat.value.name = sanitizeContent(truncatedName)
+                }
               }
+            } catch (e) {
+              console.error('Error parsing streaming data:', e)
             }
-          } catch (e) {
-            console.error('Error parsing streaming data:', e)
           }
         }
       }

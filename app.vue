@@ -160,7 +160,7 @@
         <ProjectList @select="selectProject" />
       </div>
       <div v-else-if="currentView === 'workflows'">
-        <WorkflowManager @select="selectWorkflow" />
+        <WorkflowManager @select="selectWorkflow" @start-chat="createChatFromWorkflow" />
       </div>
     </main>
 
@@ -323,6 +323,9 @@ interface Chat {
   systemPrompt?: string
   updatedAt: number
   messageCount: number
+  workflowId?: string // If this chat uses a workflow
+  projectId?: string // If this chat is based on a single project
+  chatType: 'standard' | 'workflow' | 'project' // Type of chat configuration
 }
 
 // Chat management state
@@ -461,7 +464,8 @@ function createNewChat() {
     model: getDefaultModel(),
     systemPrompt: defaultSystemPrompt.value,
     updatedAt: Date.now(),
-    messageCount: 0
+    messageCount: 0,
+    chatType: 'standard'
   }
   
   console.log('[App] Creating new chat:', {
@@ -514,7 +518,9 @@ function selectProject(projectId: string) {
       model: project.model,
       systemPrompt: project.instructions,
       updatedAt: Date.now(),
-      messageCount: 0
+      messageCount: 0,
+      projectId: projectId,
+      chatType: 'project'
     }
     
     chats.value.unshift(newChat)
@@ -533,6 +539,31 @@ function createNewWorkflow() {
   // This will be handled by the WorkflowManager component
   // We just need to ensure we're in the workflows view
   currentView.value = 'workflows'
+}
+
+function createChatFromWorkflow(workflowId: string) {
+  const { workflows } = useProjects()
+  const workflow = workflows.value.find(w => w.id === workflowId)
+  
+  if (workflow) {
+    // Create a new chat with the workflow
+    const newChat: Chat = {
+      id: crypto.randomUUID(),
+      name: `${workflow.name} - Chat`,
+      messages: [],
+      model: 'gpt-4', // Default model for workflow chats
+      systemPrompt: `This is a workflow-based chat. The workflow "${workflow.name}" will be executed with the following steps: ${workflow.steps.map((step, index) => `${index + 1}. ${step.projectId}`).join(', ')}`,
+      updatedAt: Date.now(),
+      messageCount: 0,
+      workflowId: workflowId,
+      chatType: 'workflow'
+    }
+    
+    chats.value.unshift(newChat)
+    selectedChatId.value = newChat.id
+    currentView.value = 'chats'
+    saveChatsToStorage()
+  }
 }
 
 // Storage functions - use the same format as export/import

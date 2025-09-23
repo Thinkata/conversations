@@ -21,6 +21,7 @@ export interface WorkflowStep {
   id: string
   projectId: string
   order: number
+  model?: string // Override model for this step
   inputMapping?: {
     // Maps output from previous step to input for this step
     fromStepId: string
