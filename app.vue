@@ -9,9 +9,11 @@
         <div class="flex items-center space-x-6">
           <div>
             <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              Conversations
+              {{ currentView === 'chats' ? 'Conversations' : currentView === 'projects' ? 'Projects' : 'Workflows' }}
             </h1>
-            <p class="text-sm text-gray-600 mt-1">Model Conversations and Management</p>
+            <p class="text-sm text-gray-600 mt-1">
+              {{ currentView === 'chats' ? 'Model Conversations and Management' : currentView === 'projects' ? 'AI Project Instructions' : 'Chain projects together to create automated workflows' }}
+            </p>
           </div>
           <div class="flex items-center space-x-3">
             <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -20,30 +22,71 @@
             </div>
             <!-- Storage Status Indicator -->
             <div class="flex items-center space-x-2 text-xs">
-              <div 
-                class="w-2 h-2 rounded-full"
-                :class="storageStatus.isHigh ? 'bg-yellow-500' : 'bg-green-500'"
-              ></div>
-              <span class="text-gray-600 dark:text-gray-400">
-                {{ storageStatus.sizeInMB || '0.00' }}MB
-              </span>
-              <UButton
-                v-if="storageStatus.isHigh"
-                @click="cleanupOldChats(3)"
-                color="yellow"
-                variant="ghost"
-                size="xs"
-                icon="i-heroicons-trash"
-                title="Clean up old chats to free storage space"
-                class="ml-2"
-              >
-                Cleanup
-              </UButton>
+              <ClientOnly>
+                <div 
+                  class="w-2 h-2 rounded-full"
+                  :class="storageStatus.isHigh ? 'bg-yellow-500' : 'bg-green-500'"
+                ></div>
+                <span class="text-gray-600 dark:text-gray-400">
+                  {{ storageStatus.sizeInMB || '0.00' }}MB
+                </span>
+                <template #fallback>
+                  <div class="w-2 h-2 rounded-full bg-gray-300"></div>
+                  <span class="text-gray-600 dark:text-gray-400">0.00MB</span>
+                </template>
+              </ClientOnly>
+              <ClientOnly>
+                <UButton
+                  v-if="storageStatus.isHigh"
+                  @click="cleanupOldChats(3)"
+                  color="yellow"
+                  variant="ghost"
+                  size="xs"
+                  icon="i-heroicons-trash"
+                  title="Clean up old chats to free storage space"
+                  class="ml-2"
+                >
+                  Cleanup
+                </UButton>
+              </ClientOnly>
             </div>
           </div>
         </div>
         <div class="flex items-center space-x-3">
+          <!-- View Toggle -->
+          <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+            <UButton
+              @click="currentView = 'chats'"
+              :color="currentView === 'chats' ? 'primary' : 'gray'"
+              :variant="currentView === 'chats' ? 'solid' : 'ghost'"
+              icon="i-heroicons-chat-bubble-left-right"
+              size="sm"
+            >
+              Chats
+            </UButton>
+            <UButton
+              @click="currentView = 'projects'"
+              :color="currentView === 'projects' ? 'primary' : 'gray'"
+              :variant="currentView === 'projects' ? 'solid' : 'ghost'"
+              icon="i-heroicons-folder"
+              size="sm"
+            >
+              Projects
+            </UButton>
+            <UButton
+              @click="currentView = 'workflows'"
+              :color="currentView === 'workflows' ? 'primary' : 'gray'"
+              :variant="currentView === 'workflows' ? 'solid' : 'ghost'"
+              icon="i-heroicons-arrow-path"
+              size="sm"
+            >
+              Workflows
+            </UButton>
+          </div>
+
+          <!-- Action Buttons -->
           <UButton 
+            v-if="currentView === 'chats'"
             @click="createNewChat"
             color="primary"
             variant="solid"
@@ -53,6 +96,28 @@
             data-testid="new-chat-button"
           >
             New Chat
+          </UButton>
+          <UButton 
+            v-else-if="currentView === 'projects'"
+            @click="createNewProject"
+            color="primary"
+            variant="solid"
+            icon="i-heroicons-plus"
+            size="lg"
+            class="shadow-md hover:shadow-lg transition-all duration-200"
+          >
+            New Project
+          </UButton>
+          <UButton 
+            v-else-if="currentView === 'workflows'"
+            @click="createNewWorkflow"
+            color="primary"
+            variant="solid"
+            icon="i-heroicons-plus"
+            size="lg"
+            class="shadow-md hover:shadow-lg transition-all duration-200"
+          >
+            New Workflow
           </UButton>
           <UButton 
             @click="exportChats"
@@ -88,7 +153,15 @@
 
     <!-- Main Content -->
     <main>
-      <NuxtPage />
+      <div v-if="currentView === 'chats'">
+        <NuxtPage />
+      </div>
+      <div v-else-if="currentView === 'projects'">
+        <ProjectList @select="selectProject" />
+      </div>
+      <div v-else-if="currentView === 'workflows'">
+        <WorkflowManager @select="selectWorkflow" />
+      </div>
     </main>
 
     <!-- Footer Info -->
@@ -230,6 +303,8 @@
 <script setup lang="ts">
 // Vue imports
 import { ref, computed, onMounted, provide, readonly, watch, nextTick } from 'vue'
+import ProjectList from '~/components/ProjectList.vue'
+import WorkflowManager from '~/components/WorkflowManager.vue'
 
 // Types
 interface ChatMessage {
@@ -254,6 +329,11 @@ interface Chat {
 const chats = ref<Chat[]>([])
 const selectedChatId = ref<string | null>(null)
 const isInitialLoad = ref(true)
+
+// Project management state
+const currentView = ref<'chats' | 'projects' | 'workflows'>('chats')
+const selectedProjectId = ref<string | null>(null)
+const selectedWorkflowId = ref<string | null>(null)
 
 // Modal states
 const showExportModal = ref(false)
@@ -405,6 +485,54 @@ function createNewChat() {
   
   // Notify ChatForm component through provide/inject
   // The ChatForm component will automatically detect the new chat
+}
+
+// Project management functions
+function createNewProject() {
+  // This will be handled by the ProjectList component
+  // We just need to ensure we're in the projects view
+  currentView.value = 'projects'
+}
+
+function selectProject(projectId: string) {
+  selectedProjectId.value = projectId
+  // Switch to chats view and create a new chat with the project's instructions
+  currentView.value = 'chats'
+  
+  // Get the project details
+  const { projects } = useProjects()
+  const project = projects.value.find(p => p.id === projectId)
+  
+  if (project) {
+    // Create a new chat with the project's instructions
+    const { getDefaultModel } = useDefaultModel()
+    
+    const newChat: Chat = {
+      id: crypto.randomUUID(),
+      name: `${project.name} - Chat`,
+      messages: [],
+      model: project.model,
+      systemPrompt: project.instructions,
+      updatedAt: Date.now(),
+      messageCount: 0
+    }
+    
+    chats.value.unshift(newChat)
+    selectedChatId.value = newChat.id
+    saveChatsToStorage()
+  }
+}
+
+function selectWorkflow(workflowId: string) {
+  selectedWorkflowId.value = workflowId
+  // For now, just keep the workflow selected
+  // In the future, we could show workflow details or execute it
+}
+
+function createNewWorkflow() {
+  // This will be handled by the WorkflowManager component
+  // We just need to ensure we're in the workflows view
+  currentView.value = 'workflows'
 }
 
 // Storage functions - use the same format as export/import
@@ -977,6 +1105,12 @@ provide('setSelectedChatId', (id: string) => {
   // The watcher will handle saving to localStorage in the unified format
 })
 provide('createNewChat', createNewChat)
+
+// Provide project data to child components
+provide('currentView', readonly(currentView))
+provide('selectedProjectId', readonly(selectedProjectId))
+provide('createNewProject', createNewProject)
+provide('selectProject', selectProject)
 
 // Provide function to delete chats
 provide('deleteChat', (chatId: string) => {

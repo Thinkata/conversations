@@ -64,6 +64,13 @@
                     variant="soft"
                     size="xs"
                   />
+                  <UBadge 
+                    v-if="isProjectChat(chat)"
+                    label="Project"
+                    color="green"
+                    variant="soft"
+                    size="xs"
+                  />
                 </div>
               </div>
               <UButton 
@@ -634,6 +641,10 @@ const selectedChatId = inject('selectedChatId') as Ref<string | null>
 const setSelectedChatId = inject('setSelectedChatId') as (id: string) => void
 const createNewChat = inject('createNewChat') as () => void
 const deleteChatFromParent = inject('deleteChat') as (chatId: string) => void
+
+// Get project data from parent component
+const currentView = inject('currentView') as Ref<'chats' | 'projects'>
+const selectedProjectId = inject('selectedProjectId') as Ref<string | null>
 
 // Ensure chats is reactive
 if (!chats) {
@@ -1831,6 +1842,11 @@ function formatDate(timestamp: number): string {
 
 function formatTime(timestamp: number): string {
   return formatTimeUtil(timestamp)
+}
+
+// Helper function to detect if a chat is associated with a project
+function isProjectChat(chat: Chat): boolean {
+  return chat.name.includes(' - Chat') && chat.systemPrompt && chat.systemPrompt.length > 0
 }
 </script>
 

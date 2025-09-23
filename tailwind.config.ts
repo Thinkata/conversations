@@ -39,7 +39,11 @@ export default {
     'space-y-6',
     'space-x-2',
     'space-x-3',
-    'space-x-4'
+    'space-x-4',
+    // Additional project component classes
+    'line-clamp-2',
+    'line-clamp-3',
+    'line-clamp-4'
   ],
   theme: {
     extend: {
