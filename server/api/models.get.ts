@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // Make direct HTTP request to Together.ai to avoid client library transformations
-    console.log('Making direct HTTP request to Together.ai...')
+    console.log(`Making direct HTTP request to ${baseURL}...`)
     const httpResponse = await fetch(`${baseURL}/models`, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
