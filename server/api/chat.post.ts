@@ -15,6 +15,8 @@ type RequestBody = {
   }> | null
   isContinuation?: boolean
   previousContent?: string
+  workflowId?: string
+  workflowData?: any
 }
 
 const MAX_CONTEXT_MESSAGES = 10
@@ -124,22 +126,15 @@ export default defineEventHandler(async (event) => {
       promptText = `Continue from <<CONTINUE>>`
     }
     
-    const content: any[] = [{ type: 'text', text: promptText }]
+    // For Azure AI, use simple string content format
+    let content: any = promptText
 
+    // Note: Azure AI has limited multimodal support, so we'll use text-only for now
     if (images && images.length > 0) {
-      for (const imageData of images) {
-        if (imageData && imageData.trim()) {
-          content.push({ type: 'image_url', image_url: { url: imageData.trim() } })
-        }
-      }
+      console.warn('Image support limited for Azure AI endpoints')
     }
-
     if (audios && audios.length > 0) {
-      for (const audioDataUrl of audios) {
-        if (!audioDataUrl?.trim()) continue
-        const { base64, format } = parseDataUrl(audioDataUrl.trim())
-        content.push({ type: 'input_audio', input_audio: { data: base64, format } })
-      }
+      console.warn('Audio support limited for Azure AI endpoints')
     }
 
     // Prepare context window using frontend's message history
@@ -148,7 +143,7 @@ export default defineEventHandler(async (event) => {
     // Add truncation instruction system prompt
     const truncationInstruction = {
       role: 'system' as const,
-      content: [{ type: 'text', text: 'If your response must be truncated due to length, at the very end of the content you are able to send, output exactly `<<CONTINUE>>`. When I later send `Continue from <<CONTINUE>>`, resume from where you left off without repeating prior content.' }]
+      content: 'If your response must be truncated due to length, at the very end of the content you are able to send, output exactly `<<CONTINUE>>`. When I later send `Continue from <<CONTINUE>>`, resume from where you left off without repeating prior content.'
     }
     historyForContext.push(truncationInstruction)
 
@@ -156,7 +151,7 @@ export default defineEventHandler(async (event) => {
     if (systemPrompt && systemPrompt.trim().length > 0) {
       historyForContext.push({
         role: 'system',
-        content: [{ type: 'text', text: systemPrompt.trim() }]
+        content: systemPrompt.trim()
       })
     }
     
@@ -166,25 +161,11 @@ export default defineEventHandler(async (event) => {
       const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
       
       for (const msg of recentMessages) {
-        // Handle messages with images
-        if (msg.images && msg.images.length > 0) {
-          const content: any[] = [{ type: 'text', text: msg.content }]
-          for (const imageData of msg.images) {
-            if (imageData && imageData.trim()) {
-              content.push({ type: 'image_url', image_url: { url: imageData.trim() } })
-            }
-          }
-          historyForContext.push({ 
-            role: msg.role, 
-            content: content
-          })
-        } else {
-          // Text-only messages
-          historyForContext.push({ 
-            role: msg.role, 
-            content: [{ type: 'text', text: msg.content }]
-          })
-        }
+        // Azure AI uses simple string content format
+        historyForContext.push({ 
+          role: msg.role, 
+          content: msg.content
+        })
       }
     }
 
@@ -352,7 +333,7 @@ async function handleWorkflowExecution(workflowId: string, prompt: string, workf
 
     for (let i = 0; i < workflow.steps.length; i++) {
       const step = workflow.steps[i]
-      const project = projects.find(p => p.id === step.projectId)
+      const project = projects.find((p: any) => p.id === step.projectId)
       
       console.log(`[API] Executing step ${i + 1}/${workflow.steps.length}:`, {
         stepId: step.id,
@@ -409,7 +390,7 @@ async function handleWorkflowExecution(workflowId: string, prompt: string, workf
       }
     })
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[API] Workflow execution error:', error)
     return new Response(JSON.stringify({
       content: `Workflow execution failed: ${error.message}`,
