@@ -114,6 +114,36 @@ export default defineEventHandler(async (event) => {
   // Initialize OpenAI client with AI endpoint
   const client = new OpenAI({ apiKey, baseURL })
 
+  // Handle Azure fine-tuned models - map model ID to deployment name
+  let actualModel = model.trim()
+  const isAzureEndpoint = baseURL.includes('services.ai.azure.com') || baseURL.includes('openai.azure.com')
+  
+  if (isAzureEndpoint && model.includes('.ft-')) {
+    // This is a fine-tuned model ID, we need to use the deployment name instead
+    // For now, we'll try to extract a reasonable deployment name from the model ID
+    // or you can set up a mapping in your environment variables
+    
+    // Option 1: Use environment variable mapping
+    const modelMapping = process.env.MODEL_DEPLOYMENT_MAPPING
+    if (modelMapping) {
+      try {
+        const mapping = JSON.parse(modelMapping)
+        actualModel = mapping[model] || model
+      } catch (e) {
+        console.warn('Invalid MODEL_DEPLOYMENT_MAPPING format')
+      }
+    }
+    
+    // Option 2: Try to create a deployment name from the model ID
+    if (actualModel === model) {
+      // Extract a shorter name from the fine-tuned model ID
+      const baseModel = model.split('.ft-')[0] // e.g., "gpt-4.1-mini-2025-04-14"
+      actualModel = `${baseModel}-ft` // e.g., "gpt-4.1-mini-2025-04-14-ft"
+      console.warn(`Fine-tuned model detected: ${model}. Using deployment name: ${actualModel}`)
+      console.warn('Please create a deployment with this name in Azure portal or set MODEL_DEPLOYMENT_MAPPING environment variable')
+    }
+  }
+
   try {
     // Use frontend's message history instead of backend storage
     const existingId = conversationId && conversationId.trim().length > 0 ? conversationId.trim() : crypto.randomUUID()
@@ -187,7 +217,7 @@ export default defineEventHandler(async (event) => {
     while (continueLoop) {
       // Call AI API with streaming
       const stream = await client.chat.completions.create({
-        model: model.trim(),
+        model: actualModel,
         messages: currentMessages,
         stream: true,
         max_tokens: 2048
