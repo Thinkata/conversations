@@ -156,15 +156,48 @@ export default defineEventHandler(async (event) => {
       promptText = `Continue from <<CONTINUE>>`
     }
     
-    // For Azure AI, use simple string content format
+    // Build content with multimodal support
     let content: any = promptText
 
-    // Note: Azure AI has limited multimodal support, so we'll use text-only for now
+    // Add image support for vision models
     if (images && images.length > 0) {
-      console.warn('Image support limited for Azure AI endpoints')
+      console.log(`Processing ${images.length} image(s) for vision model: ${model}`)
+      
+      // Check if model supports vision (helpful warning)
+      const modelLower = model.toLowerCase()
+      const isVisionModel = modelLower.includes('vision') || 
+                           modelLower.includes('multimodal') || 
+                           modelLower.includes('vl') ||
+                           modelLower.includes('gpt-4') // GPT-4 models generally support vision
+      
+      if (!isVisionModel) {
+        console.warn(`Warning: Model ${model} may not support vision. Consider using a vision-capable model for image input.`)
+      }
+      
+      // Format content as array for multimodal input
+      const contentParts: any[] = [
+        {
+          type: 'text',
+          text: promptText
+        }
+      ]
+      
+      // Add each image as an image_url part
+      for (const imageDataUrl of images) {
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: imageDataUrl
+          }
+        })
+      }
+      
+      content = contentParts
     }
+    
+    // Note: Audio support not yet implemented
     if (audios && audios.length > 0) {
-      console.warn('Audio support limited for Azure AI endpoints')
+      console.warn('Audio support not yet implemented')
     }
 
     // Prepare context window using frontend's message history
@@ -191,10 +224,34 @@ export default defineEventHandler(async (event) => {
       const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
       
       for (const msg of recentMessages) {
-        // Azure AI uses simple string content format
+        // Build message content with multimodal support if images exist
+        let messageContent: any = msg.content
+        
+        if (msg.images && msg.images.length > 0) {
+          // Format as multimodal content array
+          const contentParts: any[] = [
+            {
+              type: 'text',
+              text: msg.content
+            }
+          ]
+          
+          // Add images
+          for (const imageDataUrl of msg.images) {
+            contentParts.push({
+              type: 'image_url',
+              image_url: {
+                url: imageDataUrl
+              }
+            })
+          }
+          
+          messageContent = contentParts
+        }
+        
         historyForContext.push({ 
           role: msg.role, 
-          content: msg.content
+          content: messageContent
         })
       }
     }
