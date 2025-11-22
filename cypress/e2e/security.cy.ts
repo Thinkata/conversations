@@ -156,8 +156,11 @@ describe('Security Tests', () => {
         mimeType: 'text/plain'
       })
       
-      // Should show error message
-      cy.contains('Please select image files only').should('be.visible')
+      // Should show error message (now accepts images or videos, not just images)
+      // The error message format is: "Unsupported file type: {type}. Please select images or videos."
+      cy.get('[data-testid="error-message"]', { timeout: 10000 })
+        .should('be.visible')
+        .and('contain', 'Please select images or videos')
       
       // Clear the error and add a message to enable send button
       cy.get('[data-testid="message-input"]').type('Test message')
