@@ -107,7 +107,7 @@ export default defineEventHandler(async (event) => {
         created: model.created,
         owned_by: model.owned_by || model.organization || 'together-ai',
         capabilities: {
-          vision: model.id.includes('vision') || model.id.includes('multimodal') || model.id.includes('vl'),
+          vision: modelSupportsVision(model.id),
           function_calling: true, // Most modern models support this
           json_output: true, // Most modern models support this
           audio: model.id.includes('audio') || model.id.includes('speech') || model.id.includes('whisper')
@@ -131,6 +131,52 @@ export default defineEventHandler(async (event) => {
     })
   }
 })
+
+// Helper function to check if a model supports vision/video capabilities
+function modelSupportsVision(modelId: string): boolean {
+  const modelLower = modelId.toLowerCase()
+  
+  // Check for explicit vision/multimodal indicators
+  if (modelLower.includes('vision') || 
+      modelLower.includes('multimodal') || 
+      modelLower.includes('vl') ||
+      modelLower.includes('visual')) {
+    return true
+  }
+  
+  // GPT-4 models generally support vision
+  if (modelLower.includes('gpt-4')) {
+    return true
+  }
+  
+  // GPT-4o and variants
+  if (modelLower.includes('gpt-4o')) {
+    return true
+  }
+  
+  // Claude 3+ models support vision
+  if (modelLower.includes('claude-3') || modelLower.includes('claude-3.5')) {
+    return true
+  }
+  
+  // Gemini models support vision
+  if (modelLower.includes('gemini') && (modelLower.includes('pro') || modelLower.includes('flash') || modelLower.includes('ultra'))) {
+    return true
+  }
+  
+  // Together AI vision models
+  if (modelLower.includes('llama-vision') || modelLower.includes('llava')) {
+    return true
+  }
+  
+  // Qwen-VL models
+  if (modelLower.includes('qwen-vl') || modelLower.includes('qwen2-vl')) {
+    return true
+  }
+  
+  // Default to false for unknown models
+  return false
+}
 
 // Helper function to determine context length based on model ID
 function getContextLength(modelId: string): number {

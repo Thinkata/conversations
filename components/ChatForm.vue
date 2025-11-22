@@ -271,6 +271,53 @@
               </div>
             </div>
 
+            <!-- Video Previews -->
+            <div v-if="attachedVideos.length > 0" class="video-preview-container mb-3" data-testid="video-preview-container">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300" data-testid="video-count">
+                  🎥 Attached Videos ({{ attachedVideos.length }})
+                </span>
+                <UButton
+                  @click="attachedVideos = []"
+                  color="gray"
+                  variant="ghost"
+                  size="xs"
+                  class="text-xs"
+                  data-testid="clear-all-videos"
+                >
+                  Clear All
+                </UButton>
+              </div>
+              <div class="grid grid-cols-4 gap-3">
+                <div
+                  v-for="video in attachedVideos"
+                  :key="video.id"
+                  class="video-preview-item group relative"
+                  :data-testid="`video-preview-item-${video.id}`"
+                >
+                  <video 
+                    :src="video.preview" 
+                    class="w-full h-20 object-cover rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm transition-all duration-200 group-hover:scale-105"
+                    data-testid="video-preview"
+                    muted
+                    preload="metadata"
+                  />
+                  <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center">
+                    <button
+                      @click="removeVideo(video.id)"
+                      class="w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-600"
+                      title="Remove video"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div class="mt-1 text-xs text-gray-600 dark:text-gray-400 truncate" :title="video.name">
+                    {{ video.name }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Error Display -->
             <UAlert
               v-if="error"
@@ -351,7 +398,7 @@
               <div class="w-full relative">
                 <UTextarea
                   v-model="prompt"
-                  placeholder="Message AI... (Ctrl+V/Cmd+V to paste images)"
+                  placeholder="Message AI... (Ctrl+V/Cmd+V to paste images/videos)"
                   :rows="1"
                   variant="none"
                   size="xl"
@@ -378,7 +425,7 @@
                 >
                   <div class="text-center text-blue-600 dark:text-blue-400">
                     <UIcon name="i-heroicons-photo" class="h-8 w-8 mx-auto mb-2" />
-                    <p class="font-medium">Drop images here</p>
+                    <p class="font-medium">Drop images/videos here</p>
                   </div>
                 </div>
                 
@@ -401,7 +448,7 @@
               </div>
             </div>
 
-            <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="onFile" data-testid="file-input" />
+            <input ref="fileInput" type="file" accept="image/*,video/*" multiple class="hidden" @change="onFile" data-testid="file-input" />
             
             <!-- Image Processing Loading Indicator -->
             <div v-if="imageProcessingLoading" class="text-xs text-blue-600 dark:text-blue-400 mt-2 text-center">
@@ -705,6 +752,7 @@ interface ChatMessage {
   content: string
   timestamp: number
   images?: string[]
+  videos?: string[]
   needsContinuation?: boolean
   isContinuation?: boolean
   isStreaming?: boolean
@@ -865,6 +913,16 @@ const attachedImages = ref<Array<{
   dataUrl: string
 }>>([])
 
+// Videos
+const attachedVideos = ref<Array<{
+  id: string
+  name: string
+  type: string
+  size: number
+  preview: string
+  dataUrl: string
+}>>([])
+
 // Computed
 const selectedChat = computed(() => 
   chats.value?.find(chat => chat.id === selectedChatId.value)
@@ -883,8 +941,8 @@ const filteredChats = computed(() => {
 // Development mode flag - set to true for debugging, false for production
 const isDevelopment = ref(true)
 
-// Watch for changes in attached images to update layout
-watch([attachedImages, error], () => {
+// Watch for changes in attached images and videos to update layout
+watch([attachedImages, attachedVideos, error], () => {
   // Force a re-render to update the dynamic padding
   nextTick(() => {
     // This will trigger the computed property to recalculate
@@ -893,6 +951,7 @@ watch([attachedImages, error], () => {
 
 // Computed properties
 const hasAttachedImages = computed(() => attachedImages.value.length > 0)
+const hasAttachedVideos = computed(() => attachedVideos.value.length > 0)
 const inputAreaHeight = computed(() => {
   // Base height for input area
   let height = 120 // Base height in pixels (increased from 80)
@@ -900,6 +959,11 @@ const inputAreaHeight = computed(() => {
   // Add height for image previews if present
   if (hasAttachedImages.value) {
     height += 140 // Additional height for image previews (increased from 100)
+  }
+  
+  // Add height for video previews if present
+  if (hasAttachedVideos.value) {
+    height += 140 // Additional height for video previews
   }
   
   // Add height for error message if present
@@ -1417,7 +1481,8 @@ async function sendMessage() {
     role: 'user',
     content: sanitizeContent(prompt.value), // Sanitize content before storage
     timestamp: Date.now(),
-    images: attachedImages.value.map(img => img.dataUrl)
+    images: attachedImages.value.map(img => img.dataUrl),
+    videos: attachedVideos.value.map(vid => vid.dataUrl)
   }
 
   // Add user message to chat
@@ -1430,8 +1495,10 @@ async function sendMessage() {
   // Clear input
   const currentPrompt = prompt.value
   const currentImages = [...attachedImages.value]
+  const currentVideos = [...attachedVideos.value]
   prompt.value = ''
   attachedImages.value = []
+  attachedVideos.value = []
 
   console.log('[ChatForm] Setting loading to true')
   loading.value = true
@@ -1486,6 +1553,7 @@ async function sendMessage() {
         prompt: currentPrompt,
         model: selectedChat.value.model,
         images: currentImages.map(img => img.dataUrl),
+        videos: currentVideos.map(vid => vid.dataUrl),
         conversationId: selectedChat.value.id,
         systemPrompt: selectedChat.value.systemPrompt || '',
         workflowId: selectedChat.value.workflowId,
@@ -1493,7 +1561,8 @@ async function sendMessage() {
         messages: selectedChat.value.messages.map(msg => ({
           role: msg.role,
           content: msg.content,
-          images: msg.images || []
+          images: msg.images || [],
+          videos: msg.videos || []
         }))
       })
     })
@@ -1660,7 +1729,8 @@ async function requestContinuation(messageId: string) {
         messages: selectedChat.value.messages.map(msg => ({
           role: msg.role,
           content: msg.content,
-          images: msg.images || []
+          images: msg.images || [],
+          videos: msg.videos || []
         })),
         isContinuation: true,
         previousContent: message.content
@@ -1758,9 +1828,14 @@ async function onDrop(e: DragEvent) {
   
   const files = Array.from(e.dataTransfer?.files || [])
   const imageFiles = files.filter(file => file.type.startsWith('image/'))
+  const videoFiles = files.filter(file => file.type.startsWith('video/'))
   
   for (const imageFile of imageFiles) {
     await processImageFile(imageFile)
+  }
+  
+  for (const videoFile of videoFiles) {
+    await processVideoFile(videoFile)
   }
 }
 
@@ -1771,12 +1846,14 @@ async function onPaste(e: ClipboardEvent) {
   const clipboardData = e.clipboardData
   if (!clipboardData) return
   
-  // Method 1: Check items array (most reliable for images)
+  // Method 1: Check items array (most reliable for images/videos)
   const items = Array.from(clipboardData.items || [])
   console.log('Paste items:', items.map(item => ({ type: item.type, kind: item.kind })))
   
   // Look for image items
   const imageItems = items.filter(item => item.type.startsWith('image/'))
+  // Look for video items
+  const videoItems = items.filter(item => item.type.startsWith('video/'))
   
   if (imageItems.length > 0) {
     e.preventDefault()
@@ -1789,6 +1866,22 @@ async function onPaste(e: ClipboardEvent) {
       if (file) {
         console.log('Processing pasted image file:', file.name, file.type, file.size)
         await processImageFile(file)
+      }
+    }
+    return
+  }
+  
+  if (videoItems.length > 0) {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    console.log('Processing pasted videos from items:', videoItems.length)
+    
+    for (const videoItem of videoItems) {
+      const file = videoItem.getAsFile()
+      if (file) {
+        console.log('Processing pasted video file:', file.name, file.type, file.size)
+        await processVideoFile(file)
       }
     }
     return
@@ -1901,7 +1994,13 @@ async function onFile(e: Event) {
   
   for (const file of files) {
     console.log('Processing file:', file.name)
-    await processImageFile(file)
+    if (file.type.startsWith('image/')) {
+      await processImageFile(file)
+    } else if (file.type.startsWith('video/')) {
+      await processVideoFile(file)
+    } else {
+      error.value = `Unsupported file type: ${file.type}. Please select images or videos.`
+    }
   }
   
   input.value = ''
@@ -2023,6 +2122,96 @@ async function processImageFile(file: File) {
 
 function removeImage(imageId: string) {
   attachedImages.value = attachedImages.value.filter(img => img.id !== imageId)
+}
+
+async function processVideoFile(file: File) {
+  console.log('processVideoFile called with:', { name: file.name, type: file.type, size: file.size })
+  
+  if (!file.type.startsWith('video/')) {
+    error.value = 'Please select video files only'
+    console.log('File type check failed:', file.type)
+    return
+  }
+  
+  const { maxVideoSizeMB } = useDefaultModel()
+  const maxSizeBytes = maxVideoSizeMB.value * 1024 * 1024
+  
+  if (file.size > maxSizeBytes) {
+    error.value = `Video "${file.name}" is too large. Please choose files under ${maxVideoSizeMB.value}MB.`
+    console.log('File size check failed:', file.size, 'max:', maxSizeBytes)
+    return
+  }
+  
+  // Set loading state
+  imageProcessingLoading.value = true
+  error.value = ''
+  
+  try {
+    console.log('Starting video processing for:', file.name)
+    
+    // Validate video file signatures
+    const validVideoSignatures = [
+      [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70], // MP4
+      [0x1A, 0x45, 0xDF, 0xA3], // WebM
+      [0x46, 0x4C, 0x56, 0x01], // FLV
+      [0x52, 0x49, 0x46, 0x46], // AVI (RIFF)
+    ]
+    
+    const arrayBuffer = await file.arrayBuffer()
+    const uint8Array = new Uint8Array(arrayBuffer)
+    
+    const isValidSignature = validVideoSignatures.some(signature => {
+      return signature.every((byte, index) => uint8Array[index] === byte)
+    })
+    
+    if (!isValidSignature) {
+      // Some video formats might not match signatures exactly, so we'll be lenient
+      // but log a warning
+      console.warn('Video signature validation inconclusive for:', file.name)
+    }
+    
+    console.log('File validation passed, starting processing...')
+    
+    const dataUrl = await readAsDataURL(file)
+    console.log('Data URL created, length:', dataUrl.length)
+    
+    const videoId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    console.log('Generated video ID:', videoId)
+    
+    // Check if we already have too many videos
+    if (attachedVideos.value.length >= 10) {
+      error.value = 'Maximum 10 videos allowed. Please remove some before adding more.'
+      console.log('Too many videos already attached:', attachedVideos.value.length)
+      return
+    }
+    
+    console.log('Adding video to attachedVideos array...')
+    attachedVideos.value.push({
+      id: videoId,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      preview: dataUrl,
+      dataUrl: dataUrl
+    })
+    
+    console.log('Video added successfully. New count:', attachedVideos.value.length)
+    
+    // Show success feedback
+    console.log(`Video "${file.name}" added successfully`)
+    console.log('Current attached videos count:', attachedVideos.value.length)
+  } catch (err) {
+    error.value = `Failed to process video "${file.name}"`
+    console.error('Video processing error:', err)
+  } finally {
+    // Always clear loading state
+    imageProcessingLoading.value = false
+    console.log('Video processing completed, loading state cleared')
+  }
+}
+
+function removeVideo(videoId: string) {
+  attachedVideos.value = attachedVideos.value.filter(vid => vid.id !== videoId)
 }
 
 function readAsDataURL(file: File): Promise<string> {

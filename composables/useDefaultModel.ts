@@ -21,6 +21,14 @@ export const useDefaultModel = () => {
     config.public.MAX_IMAGE_SIZE_MB || 10
   )
   
+  const enableVideoUpload = computed(() => 
+    config.public.ENABLE_VIDEO_UPLOAD !== false
+  )
+  
+  const maxVideoSizeMB = computed(() => 
+    config.public.MAX_VIDEO_SIZE_MB || 50
+  )
+  
   const getDefaultModel = () => defaultModel.value
   
   const isDefaultModel = (modelId: string) => modelId === defaultModel.value
@@ -31,6 +39,8 @@ export const useDefaultModel = () => {
     defaultSystemPrompt,
     enableImageUpload,
     maxImageSizeMB,
+    enableVideoUpload,
+    maxVideoSizeMB,
     getDefaultModel,
     isDefaultModel
   }

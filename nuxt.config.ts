@@ -19,8 +19,8 @@ export default defineNuxtConfig({
     experimental: {
       wasm: true
     },
-    // Request size limits
-    maxRequestBodySize: '10mb',
+    // Request size limits (increased for video support)
+    maxRequestBodySize: '100mb',
     routeRules: {
       '/**': {
         headers: {
@@ -71,7 +71,9 @@ export default defineNuxtConfig({
       APP_NAME: process.env.APP_NAME || 'RawChat',
       DEFAULT_SYSTEM_PROMPT: process.env.DEFAULT_SYSTEM_PROMPT || '',
       ENABLE_IMAGE_UPLOAD: process.env.ENABLE_IMAGE_UPLOAD !== 'false', // true by default
-      MAX_IMAGE_SIZE_MB: parseInt(process.env.MAX_IMAGE_SIZE_MB || '10')
+      MAX_IMAGE_SIZE_MB: parseInt(process.env.MAX_IMAGE_SIZE_MB || '10'),
+      ENABLE_VIDEO_UPLOAD: process.env.ENABLE_VIDEO_UPLOAD !== 'false', // true by default
+      MAX_VIDEO_SIZE_MB: parseInt(process.env.MAX_VIDEO_SIZE_MB || '50')
     }
   }
 })

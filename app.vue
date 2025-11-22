@@ -313,6 +313,7 @@ interface ChatMessage {
   content: string
   timestamp: number
   images?: string[]
+  videos?: string[]
 }
 
 interface Chat {

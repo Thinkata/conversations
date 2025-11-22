@@ -6,12 +6,14 @@ type RequestBody = {
   model: string
   images?: string[] | null
   audios?: string[] | null
+  videos?: string[] | null
   conversationId?: string | null
   systemPrompt?: string | null
   messages?: Array<{
     role: 'user' | 'assistant'
     content: string
     images?: string[]
+    videos?: string[]
   }> | null
   isContinuation?: boolean
   previousContent?: string
@@ -20,6 +22,52 @@ type RequestBody = {
 }
 
 const MAX_CONTEXT_MESSAGES = 10
+
+// Function to check if a model supports vision/video capabilities
+function modelSupportsVision(modelId: string): boolean {
+  const modelLower = modelId.toLowerCase()
+  
+  // Check for explicit vision/multimodal indicators
+  if (modelLower.includes('vision') || 
+      modelLower.includes('multimodal') || 
+      modelLower.includes('vl') ||
+      modelLower.includes('visual')) {
+    return true
+  }
+  
+  // GPT-4 models generally support vision
+  if (modelLower.includes('gpt-4')) {
+    return true
+  }
+  
+  // GPT-4o and variants
+  if (modelLower.includes('gpt-4o')) {
+    return true
+  }
+  
+  // Claude 3+ models support vision
+  if (modelLower.includes('claude-3') || modelLower.includes('claude-3.5')) {
+    return true
+  }
+  
+  // Gemini models support vision
+  if (modelLower.includes('gemini') && (modelLower.includes('pro') || modelLower.includes('flash') || modelLower.includes('ultra'))) {
+    return true
+  }
+  
+  // Together AI vision models
+  if (modelLower.includes('llama-vision') || modelLower.includes('llava')) {
+    return true
+  }
+  
+  // Qwen-VL models
+  if (modelLower.includes('qwen-vl') || modelLower.includes('qwen2-vl')) {
+    return true
+  }
+  
+  // Default to false for unknown models
+  return false
+}
 
 // Function to check if content ends with CONTINUE signal
 function hasContinueSignal(content: string): boolean {
@@ -58,7 +106,7 @@ function parseDataUrl(dataUrl: string) {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
-  const { prompt, model, images, audios, conversationId, systemPrompt, messages, isContinuation, previousContent, workflowId, workflowData } = body || {}
+  const { prompt, model, images, audios, videos, conversationId, systemPrompt, messages, isContinuation, previousContent, workflowId, workflowData } = body || {}
 
   // Enhanced input validation and sanitization
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -161,17 +209,15 @@ export default defineEventHandler(async (event) => {
 
     // Add image support for vision models
     if (images && images.length > 0) {
-      console.log(`Processing ${images.length} image(s) for vision model: ${model}`)
+      console.log(`Processing ${images.length} image(s) for model: ${model}`)
       
-      // Check if model supports vision (helpful warning)
-      const modelLower = model.toLowerCase()
-      const isVisionModel = modelLower.includes('vision') || 
-                           modelLower.includes('multimodal') || 
-                           modelLower.includes('vl') ||
-                           modelLower.includes('gpt-4') // GPT-4 models generally support vision
+      // Check if model supports vision (warning only for images, as some APIs may still work)
+      const supportsVision = modelSupportsVision(model)
       
-      if (!isVisionModel) {
+      if (!supportsVision) {
         console.warn(`Warning: Model ${model} may not support vision. Consider using a vision-capable model for image input.`)
+      } else {
+        console.log(`Verified: Model ${model} supports vision input`)
       }
       
       // Format content as array for multimodal input
@@ -188,6 +234,51 @@ export default defineEventHandler(async (event) => {
           type: 'image_url',
           image_url: {
             url: imageDataUrl
+          }
+        })
+      }
+      
+      content = contentParts
+    }
+    
+    // Add video support for vision models
+    if (videos && videos.length > 0) {
+      console.log(`Processing ${videos.length} video(s) for model: ${model}`)
+      
+      // Verify model supports vision/video before processing
+      const supportsVision = modelSupportsVision(model)
+      
+      if (!supportsVision) {
+        console.error(`Model ${model} does not support video/vision input`)
+        throw createError({
+          statusCode: 400,
+          statusMessage: `Model "${model}" does not support video attachments. Please use a vision-capable model (e.g., GPT-4, Claude 3, Gemini, or models with "vision" in the name).`
+        })
+      }
+      
+      console.log(`Verified: Model ${model} supports vision/video input`)
+      
+      // Format content as array for multimodal input (combine with images if present)
+      let contentParts: any[] = []
+      
+      // If content is already an array (from images), use it; otherwise create new array
+      if (Array.isArray(content)) {
+        contentParts = content
+      } else {
+        contentParts = [
+          {
+            type: 'text',
+            text: promptText
+          }
+        ]
+      }
+      
+      // Add each video as an image_url part (videos are sent as data URLs, similar to images)
+      for (const videoDataUrl of videos) {
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: videoDataUrl
           }
         })
       }
@@ -224,10 +315,10 @@ export default defineEventHandler(async (event) => {
       const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
       
       for (const msg of recentMessages) {
-        // Build message content with multimodal support if images exist
+        // Build message content with multimodal support if images or videos exist
         let messageContent: any = msg.content
         
-        if (msg.images && msg.images.length > 0) {
+        if ((msg.images && msg.images.length > 0) || (msg.videos && msg.videos.length > 0)) {
           // Format as multimodal content array
           const contentParts: any[] = [
             {
@@ -237,13 +328,27 @@ export default defineEventHandler(async (event) => {
           ]
           
           // Add images
-          for (const imageDataUrl of msg.images) {
-            contentParts.push({
-              type: 'image_url',
-              image_url: {
-                url: imageDataUrl
-              }
-            })
+          if (msg.images) {
+            for (const imageDataUrl of msg.images) {
+              contentParts.push({
+                type: 'image_url',
+                image_url: {
+                  url: imageDataUrl
+                }
+              })
+            }
+          }
+          
+          // Add videos
+          if (msg.videos) {
+            for (const videoDataUrl of msg.videos) {
+              contentParts.push({
+                type: 'image_url',
+                image_url: {
+                  url: videoDataUrl
+                }
+              })
+            }
           }
           
           messageContent = contentParts
